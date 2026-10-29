@@ -21,6 +21,8 @@
     "skipLibCheck": false
   },
   "include": [
+    "worktree",
+    "picker",
     "*.ts",
     "*.tsx",
     "components",

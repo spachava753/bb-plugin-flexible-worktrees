@@ -89,20 +89,6 @@ export function shortPath(path: string) {
   return path.replace(/^\/Users\/[^/]+(?=\/|$)|^\/home\/[^/]+(?=\/|$)/, "~");
 }
 
-/** One plain sentence describing what launching will do. */
-export function describePlan(p: Plan) {
-  const where = p.path ? `\`${shortPath(p.path)}\`` : "a new folder";
-  const fetched = p.fetch ? " (fetched at launch)" : "";
-  const diff = p.mergeBaseBranch ? ` Diff compares against \`${p.mergeBaseBranch}\`.` : "";
-  switch (p.action) {
-    case "attach": return `Attaches existing checkout ${where}. No Git changes; shares files with anything else using it.`;
-    case "new-branch": return `Creates ${where} on new branch ${p.branch ? `\`${p.branch}\`` : "(automatic name)"} from \`${p.startLabel}\`${fetched}.${diff}`;
-    case "local-branch": return `Creates ${where} on local branch \`${p.branch}\`${p.fastForward ? `, fast-forwarded to \`${p.startLabel}\` if possible` : ""}.${diff}`;
-    case "track-remote": return `Fetches \`${p.startLabel}\` and creates ${where} on local branch \`${p.branch}\` tracking it.${diff}`;
-    case "detached": return `Fetches ${p.startLabel} and creates a detached worktree at ${where}.${diff}`;
-  }
-}
-
 /** Folder name derived from a branch: feature/x -> feature-x. */
 export function slug(value: string) {
   return value.replace(/[\\/:\s]+/g, "-").replace(/[^\w.@+-]/g, "").replace(/^[-.]+|[-.]+$/g, "").replace(/-+/g, "-").slice(0, 80) || "worktree";

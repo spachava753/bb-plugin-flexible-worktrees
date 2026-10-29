@@ -3,7 +3,11 @@ import { mkdtemp, mkdir, readdir, rm, writeFile, readFile, realpath, symlink } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inputsSchema } from "./contract";
-import { choices, create, git, list, liveBranches, plan, repoOf } from "./worktrees";
+import { choices, liveBranches } from "./worktree/choices";
+import { create } from "./worktree/create";
+import { git, list } from "./worktree/git";
+import { repoOf } from "./worktree/github";
+import { plan } from "./worktree/plan";
 
 let temp: string, source: string, data: string;
 const commit = (cwd: string, message: string) => git(cwd, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", message]);
