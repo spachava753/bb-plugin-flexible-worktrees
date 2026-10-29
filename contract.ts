@@ -1,22 +1,26 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { inputsSchema, planSchema, remoteChoicesSchema } from "./inputs";
+import { choicesSchema, inputsSchema, liveBranchesSchema, planResultSchema, planSchema, previewSchema, pullsSchema } from "./inputs";
 export { inputsSchema, planSchema, type Inputs, type Plan } from "./inputs";
 
-const worktree = z.object({ path: z.string(), branch: z.string() });
+const source = z.object({ source: z.string() });
 export const hostContract = defineRpcContract({
-  remoteBranches: { input: z.object({ source: z.string() }), output: remoteChoicesSchema },
-  list: { input: z.object({ source: z.string() }), output: z.array(worktree) },
+  choices: { input: source, output: choicesSchema.omit({ defaultRoot: true }) },
+  liveBranches: { input: source, output: liveBranchesSchema },
+  pulls: { input: source, output: pullsSchema },
   plan: {
-    input: z.object({ source: z.string(), inputs: inputsSchema, defaultRoot: z.string(), pathKey: z.string(), suggestedBranch: z.string() }),
-    output: planSchema,
+    input: z.object({ source: z.string(), inputs: inputsSchema, defaultRoot: z.string(), pathKey: z.string().optional(), suggestedBranch: z.string().optional() }),
+    output: planResultSchema,
   },
-  create: { input: planSchema, output: z.object({ path: z.string() }) },
+  create: {
+    input: z.object({ plan: planSchema, inputs: inputsSchema, pathKey: z.string(), initSubmodules: z.boolean() }),
+    output: z.object({ path: z.string(), log: z.array(z.string()) }),
+  },
 });
+const target = z.object({ projectId: z.string(), hostId: z.string() }).strict();
 export const rpcContract = defineRpcContract({
-  remoteBranches: { input: z.object({ projectId: z.string(), hostId: z.string() }).strict(), output: remoteChoicesSchema },
-  choices: {
-    input: z.object({ projectId: z.string(), hostId: z.string() }).strict(),
-    output: z.object({ worktrees: z.array(worktree), defaultRoot: z.string() }),
-  },
+  choices: { input: target, output: choicesSchema },
+  liveBranches: { input: target, output: liveBranchesSchema },
+  pulls: { input: target, output: pullsSchema },
+  preview: { input: target.extend({ inputs: inputsSchema }), output: previewSchema },
 });

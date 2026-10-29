@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-flexible-worktrees",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "author": "Shashank Pachava (https://github.com/spachava753)",

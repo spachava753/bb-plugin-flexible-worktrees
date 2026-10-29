@@ -1,13 +1,14 @@
 import { experimental_defineHostEntry } from "@get-bb/plugin-sdk/host";
 import { hostContract } from "./contract";
-import { create, list, plan, remoteBranches } from "./worktrees";
+import { choices, create, liveBranches, plan, pulls } from "./worktrees";
 
 export default experimental_defineHostEntry({
   contract: hostContract,
   handlers: {
-    remoteBranches: ({ source }, ctx) => remoteBranches(source, ctx.signal),
-    list: ({ source }, ctx) => list(source, ctx.signal),
-    plan: (args, ctx) => plan(args, ctx.signal),
+    choices: ({ source }, ctx) => choices(source, ctx.signal),
+    liveBranches: ({ source }, ctx) => liveBranches(source, ctx.signal),
+    pulls: ({ source }, ctx) => pulls(source, ctx.signal),
+    plan: (args, ctx) => plan({ ...args, dataDir: ctx.experimental_paths.dataDir }, ctx.signal),
     create: (args, ctx) => create(args, ctx.experimental_paths.dataDir, ctx.signal),
   },
 });

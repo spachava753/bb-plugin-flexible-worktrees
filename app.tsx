@@ -1,55 +1,78 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { definePluginApp, useRpc, type PluginEnvironmentProviderInputsProps } from "@get-bb/plugin-sdk/app";
-import { inputsSchema, type Inputs, type RemoteChoices } from "./inputs";
-import { WorktreePicker, type Checkout } from "./WorktreePicker";
+import { defaultInputs, inputsSchema, type Choices, type Inputs, type LiveBranches, type Preview, type Pulls } from "./inputs";
+import { WorktreePicker } from "./WorktreePicker";
 import type { rpcContract } from "./server";
+
+const failed = (e: unknown) => String(e instanceof Error ? e.message : e);
 
 function InputsForm(props: PluginEnvironmentProviderInputsProps) {
   const rpc = useRpc<typeof rpcContract>();
-  const [form, setForm] = useState<Inputs>(() => inputsSchema.safeParse(props.value ?? {}).data ?? inputsSchema.parse({}));
-  const [choices, setChoices] = useState<Checkout[]>([]);
-  const [remoteChoices, setRemoteChoices] = useState<RemoteChoices>({ branches: [], errors: [] });
+  const [form, setForm] = useState<Inputs>(() => inputsSchema.safeParse(props.value ?? defaultInputs).data ?? defaultInputs);
+  const [choices, setChoices] = useState<Choices | null>(null);
+  const [choicesError, setChoicesError] = useState("");
+  const [live, setLive] = useState<LiveBranches | null>(null);
+  const [pulls, setPulls] = useState<Pulls | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(false);
-  const [remoteRefresh, setRemoteRefresh] = useState(0);
-  const [root, setRoot] = useState("~/dev/worktrees/{repo}");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [checking, setChecking] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const remoteLoaded = useRef(false);
   const onChange = useRef(props.onChange);
   onChange.current = props.onChange;
   const hostId = props.target.kind === "existing-host" ? props.target.hostId : null;
+  const target = props.projectId && hostId ? { projectId: props.projectId, hostId } : null;
+
   useEffect(() => {
     const parsed = inputsSchema.safeParse(form);
-    onChange.current(parsed.success ? { status: "ready", value: parsed.data } : { status: "blocked", reason: parsed.error.issues[0]!.message });
-  }, [form]);
+    if (!parsed.success) onChange.current({ status: "blocked", reason: parsed.error.issues[0]!.message });
+    else if (preview && !preview.ok && !checking) onChange.current({ status: "blocked", reason: preview.error });
+    else onChange.current({ status: "ready", value: parsed.data });
+  }, [form, preview, checking]);
+
   useEffect(() => {
+    if (!target) return;
     let active = true;
-    setError("");
-    setLoading(Boolean(props.projectId && hostId));
-    if (props.projectId && hostId) {
-      rpc.call("choices", { projectId: props.projectId, hostId }).then(result => {
-        if (active) { setChoices(result.worktrees); setRoot(result.defaultRoot); }
-      }).catch(e => { if (active) setError(String(e)); })
-        .finally(() => { if (active) setLoading(false); });
-    }
+    setChoicesError("");
+    rpc.call("choices", target).then(result => { if (active) setChoices(result); })
+      .catch(e => { if (active) setChoicesError(failed(e)); });
     return () => { active = false; };
   }, [props.projectId, hostId, refresh]);
-  const remoteMode = form.mode === "remote-branch";
-  useEffect(() => {
-    if (!remoteMode || !props.projectId || !hostId) return;
-    let active = true;
+
+  // Network lookups wait until the popover opens; local branches render first.
+  const loadRemote = useCallback(() => {
+    if (!target) return;
+    remoteLoaded.current = true;
     setRemoteLoading(true);
-    setRemoteChoices({ branches: [], errors: [] });
-    rpc.call("remoteBranches", { projectId: props.projectId, hostId }).then(result => {
-      if (active) setRemoteChoices(result);
-    }).catch(() => {
-      if (active) setRemoteChoices({ branches: [], errors: ["Couldn’t load remote branches. Check the connection and refresh."] });
-    }).finally(() => { if (active) setRemoteLoading(false); });
-    return () => { active = false; };
-  }, [remoteMode, props.projectId, hostId, remoteRefresh]);
-  return <WorktreePicker form={form} choices={choices} defaultRoot={root} error={error} loading={loading}
-    remoteChoices={remoteChoices} remoteLoading={remoteLoading} onRefreshRemote={() => setRemoteRefresh(n => n + 1)}
-    onChange={setForm} onRefresh={() => setRefresh(n => n + 1)} />;
+    Promise.allSettled([
+      rpc.call("liveBranches", target).then(setLive),
+      rpc.call("pulls", target).then(setPulls),
+    ]).then(results => {
+      if (results[0].status === "rejected") setLive({ branches: [], errors: ["Couldn’t reach remotes; showing last fetched branches."] });
+      if (results[1].status === "rejected") setPulls({ available: false, pulls: [] });
+      setRemoteLoading(false);
+    });
+  }, [props.projectId, hostId]);
+
+  useEffect(() => {
+    const parsed = inputsSchema.safeParse(form);
+    if (!target || !parsed.success) { setPreview(null); setChecking(false); return; }
+    let active = true;
+    setChecking(true);
+    const timer = setTimeout(() => {
+      rpc.call("preview", { ...target, inputs: parsed.data }).then(result => { if (active) setPreview(result); })
+        // Transport failures don't block: the server re-validates at launch.
+        .catch(() => { if (active) setPreview(null); })
+        .finally(() => { if (active) setChecking(false); });
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
+  }, [form, props.projectId, hostId, refresh]);
+
+  // Inputs travel as JSON: drop keys the picker cleared to undefined.
+  return <WorktreePicker form={form} onChange={next => setForm(JSON.parse(JSON.stringify(next)))} choices={choices} choicesError={choicesError}
+    live={live} pulls={pulls} remoteLoading={remoteLoading} preview={preview} checking={checking}
+    onOpen={() => { if (!remoteLoaded.current) loadRemote(); }}
+    onRefresh={() => { setRefresh(n => n + 1); loadRemote(); }} />;
 }
 export default definePluginApp(app => {
   app.slots.experimental_environmentProviderInputs({
