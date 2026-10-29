@@ -1,15 +1,22 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { hostContract, inputsSchema, rpcContract } from "./contract";
-import { shortPath, type Inputs, type PlanResult } from "./inputs";
+import { DEFAULT_PATH_TEMPLATE, projectOverridesSettingSchema, shortPath, templateSchema, type Inputs, type PlanResult } from "./inputs";
+import { projectTemplate } from "./settings";
 export { rpcContract } from "./contract";
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export default function plugin(bb: BbPluginApi) {
   const settings = bb.settings.define({
-    defaultRoot: {
-      type: "string", label: "Default worktree parent directory ({repo} = repository name)",
-      default: "~/dev/worktrees/{repo}",
+    pathTemplate: {
+      type: "string", label: "Worktree path template",
+      description: `Complete destination, including the folder name. Blank uses ${DEFAULT_PATH_TEMPLATE}. See the template reference below.`,
+      default: DEFAULT_PATH_TEMPLATE, experimental_schema: templateSchema,
+    },
+    projectOverrides: {
+      type: "string", label: "Per-project path templates (JSON)",
+      description: "Optional JSON map of project IDs or remote identities to templates. Leave {} to use the global template. Examples are below.",
+      default: "{}", experimental_multiline: true, experimental_schema: projectOverridesSettingSchema,
     },
     initSubmodules: {
       type: "boolean", label: "Initialize submodules in new worktrees",
@@ -18,11 +25,16 @@ export default function plugin(bb: BbPluginApi) {
     },
   });
   const host = bb.hosts.experimental_client({ contract: hostContract });
-  async function sourceFor(projectId: string, hostId: string) {
+  type Project = Awaited<ReturnType<typeof bb.sdk.projects.get>>;
+  /** The template for this project: project ID entry, most specific remote pattern, then the global setting. */
+  const templateFor = async (project: Pick<Project, "id" | "gitRemoteUrl">) => projectTemplate(await settings.get(), project.id, project.gitRemoteUrl);
+  /** The project's checkout on this machine (its default source first) and its destination template. */
+  async function scope(projectId: string, hostId: string) {
     const project = await bb.sdk.projects.get({ projectId });
-    const source = project.sources.find(s => s.hostId === hostId);
+    const sources = project.sources.filter(s => s.hostId === hostId);
+    const source = sources.find(s => s.isDefault) ?? sources[0];
     if (!source) throw new Error("This project has no checkout on the selected machine");
-    return source.path;
+    return { source: source.path, pathTemplate: await templateFor(project) };
   }
   /** Attaching a path another provider may remove would leave this thread without files. */
   async function checkAttach(result: PlanResult, hostId: string) {
@@ -40,24 +52,24 @@ export default function plugin(bb: BbPluginApi) {
       ? { ...result, warnings: [...result.warnings, "Another BB environment already uses this checkout. To share it, choose that environment in the environment picker instead."] }
       : result;
   }
-  async function preflight(source: string, hostId: string, inputs: Inputs, signal?: AbortSignal) {
-    const result = await host.call("plan", { source, inputs, defaultRoot: (await settings.get()).defaultRoot }, { hostId, signal, timeoutMs: 60_000 });
+  async function preflight({ source, pathTemplate }: { source: string; pathTemplate: string }, hostId: string, inputs: Inputs) {
+    const result = await host.call("plan", { source, inputs, pathTemplate }, { hostId, timeoutMs: 60_000 });
     return checkAttach(result, hostId);
   }
 
   bb.rpc.register(rpcContract, {
     async choices({ projectId, hostId }) {
-      const result = await host.call("choices", { source: await sourceFor(projectId, hostId) }, { hostId });
-      return { ...result, defaultRoot: (await settings.get()).defaultRoot };
+      const { source, pathTemplate } = await scope(projectId, hostId);
+      return { ...await host.call("choices", { source }, { hostId }), pathTemplate };
     },
     async liveBranches({ projectId, hostId }) {
-      return host.call("liveBranches", { source: await sourceFor(projectId, hostId) }, { hostId, timeoutMs: 180_000 });
+      return host.call("liveBranches", { source: (await scope(projectId, hostId)).source }, { hostId, timeoutMs: 180_000 });
     },
     async pulls({ projectId, hostId }) {
-      return host.call("pulls", { source: await sourceFor(projectId, hostId) }, { hostId, timeoutMs: 60_000 });
+      return host.call("pulls", { source: (await scope(projectId, hostId)).source }, { hostId, timeoutMs: 60_000 });
     },
     async preview({ projectId, hostId, inputs }) {
-      try { return { ok: true as const, ...await preflight(await sourceFor(projectId, hostId), hostId, inputs) }; } catch (error) {
+      try { return { ok: true as const, ...await preflight(await scope(projectId, hostId), hostId, inputs) }; } catch (error) {
         return { ok: false as const, error: message(error) };
       }
     },
@@ -70,7 +82,7 @@ export default function plugin(bb: BbPluginApi) {
     policy: { retireGraceMs: null, pathKeys: "per-thread" },
     async validate(ctx) {
       // Same resolution as the picker preview, so predictable conflicts never become failed environments.
-      try { await preflight(ctx.projectCheckout.path, ctx.host.id, ctx.inputs); } catch (error) {
+      try { await preflight({ source: ctx.projectCheckout.path, pathTemplate: await templateFor(ctx.project) }, ctx.host.id, ctx.inputs); } catch (error) {
         return { action: "refuse", message: message(error) };
       }
       return { action: "accept" };
@@ -79,8 +91,7 @@ export default function plugin(bb: BbPluginApi) {
       const options = { hostId: ctx.host.id, signal: ctx.signal, timeoutMs: 1_800_000 };
       ctx.report.step("Resolving workspace");
       const { plan: p, warnings } = await checkAttach(await host.call("plan", {
-        source: ctx.projectCheckout.path, inputs: ctx.inputs,
-        defaultRoot: (await settings.get()).defaultRoot,
+        source: ctx.projectCheckout.path, inputs: ctx.inputs, pathTemplate: await templateFor(ctx.project),
         pathKey: ctx.pathKey, suggestedBranch: ctx.suggestedBranchName,
       }, { ...options, timeoutMs: 180_000 }), ctx.host.id);
       for (const warning of warnings) ctx.report.log(warning);

@@ -3,15 +3,15 @@ import type { IconKind } from "./parts";
 
 /** One plain sentence describing what launching will do. */
 export function describePlan(p: Plan) {
-  const where = p.path ? `\`${shortPath(p.path)}\`` : "a new folder";
+  const where = `\`${shortPath(p.path)}\``;
   const fetched = p.fetch ? " (fetched at launch)" : "";
-  const diff = p.mergeBaseBranch ? ` Diff compares against \`${p.mergeBaseBranch}\`.` : "";
+  const notes = (p.mergeBaseBranch ? ` Diff compares against \`${p.mergeBaseBranch}\`.` : "") + (p.path.includes("<automatic") ? " Automatic names are assigned at launch." : "");
   switch (p.action) {
     case "attach": return `Attaches existing checkout ${where}. No Git changes; shares files with anything else using it.`;
-    case "new-branch": return `Creates ${where} on new branch ${p.branch ? `\`${p.branch}\`` : "(automatic name)"} from \`${p.startLabel}\`${fetched}.${diff}`;
-    case "local-branch": return `Creates ${where} on local branch \`${p.branch}\`${p.fastForward ? `, fast-forwarded to \`${p.startLabel}\` if possible` : ""}.${diff}`;
-    case "track-remote": return `Fetches \`${p.startLabel}\` and creates ${where} on local branch \`${p.branch}\` tracking it.${diff}`;
-    case "detached": return `Fetches ${p.startLabel} and creates a detached worktree at ${where}.${diff}`;
+    case "new-branch": return `Creates ${where} on new branch ${p.branch ? `\`${p.branch}\`` : "(automatic name)"} from \`${p.startLabel}\`${fetched}.${notes}`;
+    case "local-branch": return `Creates ${where} on local branch \`${p.branch}\`${p.fastForward ? `, fast-forwarded to \`${p.startLabel}\` if possible` : ""}.${notes}`;
+    case "track-remote": return `Fetches \`${p.startLabel}\` and creates ${where} on local branch \`${p.branch}\` tracking it.${notes}`;
+    case "detached": return `Fetches ${p.startLabel} and creates a detached worktree at ${where}.${notes}`;
   }
 }
 

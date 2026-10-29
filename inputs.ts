@@ -30,7 +30,7 @@ const fetchSchema = z.object({ remote: z.string(), from: z.string(), into: z.str
 export const planSchema = z.object({
   action: z.enum(["attach", "new-branch", "local-branch", "track-remote", "detached"]),
   source: z.string(),
-  /** Empty only in previews whose folder depends on BB's launch-time names. */
+  /** Canonical destination. In previews, names BB assigns at launch appear as `<automatic …>` placeholders. */
   path: z.string(),
   /** Local branch to create or check out; empty for attach and detached. */
   branch: z.string(),
@@ -72,7 +72,8 @@ export const choicesSchema = z.object({
   remotes: z.array(z.string()),
   defaultRemote: z.string().optional(),
   defaultBase: z.string(),
-  defaultRoot: z.string(),
+  /** The destination template that applies to this project. */
+  pathTemplate: z.string(),
 });
 export type Choices = z.infer<typeof choicesSchema>;
 export const liveBranchesSchema = z.object({ branches: z.array(z.object({ remote: z.string(), branch: z.string() })), errors: z.array(z.string()) });
@@ -89,7 +90,18 @@ export function shortPath(path: string) {
   return path.replace(/^\/Users\/[^/]+(?=\/|$)|^\/home\/[^/]+(?=\/|$)/, "~");
 }
 
-/** Folder name derived from a branch: feature/x -> feature-x. */
-export function slug(value: string) {
-  return value.replace(/[\\/:\s]+/g, "-").replace(/[^\w.@+-]/g, "").replace(/^[-.]+|[-.]+$/g, "").replace(/-+/g, "-").slice(0, 80) || "worktree";
-}
+export const templateTokens = ["repo", "repoPath", "checkoutParent", "branch", "pathKey"] as const;
+export type TemplateToken = typeof templateTokens[number];
+/** A destination template: a complete path, including the folder, with single-brace variables only. */
+export const templateSchema = z.string().max(4096)
+  .refine(s => !/[\0\r\n]/.test(s), "Must be a single line")
+  .refine(s => !/[{}]/.test(s.replace(/\{([^{}]+)\}/g, (match, token: string) => (templateTokens as readonly string[]).includes(token) ? "" : match)),
+    `Use only ${templateTokens.map(t => `{${t}}`).join(", ")}`);
+export const DEFAULT_PATH_TEMPLATE = "~/worktrees/{pathKey}";
+/** Unset, empty, or whitespace-only templates use the default. */
+export const pathTemplateSchema = templateSchema.transform(value => value.trim() ? value : DEFAULT_PATH_TEMPLATE).default(DEFAULT_PATH_TEMPLATE);
+export const projectOverridesSchema = z.record(z.string().min(1), templateSchema);
+export const projectOverridesSettingSchema = z.string().max(65536).superRefine((value, ctx) => {
+  try { projectOverridesSchema.parse(JSON.parse(value)); }
+  catch { ctx.addIssue({ code: "custom", message: "Use a JSON object mapping project IDs or remote identities to path templates with supported variables" }); }
+});

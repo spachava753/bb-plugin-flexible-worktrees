@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { definePluginApp, useRpc, type PluginEnvironmentProviderInputsProps } from "@get-bb/plugin-sdk/app";
 import { defaultInputs, inputsSchema, type Inputs } from "./inputs";
 import { useChoices, usePreview, useRemoteData } from "./picker/data";
+import { TemplateReference } from "./TemplateReference";
 import { WorktreePicker } from "./WorktreePicker";
 import type { rpcContract } from "./server";
 
@@ -32,6 +33,7 @@ function InputsForm(props: PluginEnvironmentProviderInputsProps) {
     onOpen={remote.loadOnce} onRefresh={() => { setRefresh(n => n + 1); remote.load(); }} />;
 }
 export default definePluginApp(app => {
+  app.slots.settingsSection({ id: "template-reference", title: "Template reference", component: TemplateReference });
   app.slots.experimental_environmentProviderInputs({
     environmentProviderId: "flexible-worktrees",
     component: props => <InputsForm key={`${props.projectId}:${props.target.kind === "existing-host" ? props.target.hostId : "new"}`} {...props} />,

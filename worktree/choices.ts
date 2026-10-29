@@ -4,7 +4,7 @@ import { defaultBase, defaultRemote } from "./plan";
 import { HEADS, parseTrack, splitRemoteRef } from "./refs";
 
 /** Branch rows for the picker from local refs only: instant, possibly stale. Local branches absorb their upstream rows. */
-export async function choices(source: string, signal?: AbortSignal): Promise<Omit<Choices, "defaultRoot">> {
+export async function choices(source: string, signal?: AbortSignal): Promise<Omit<Choices, "pathTemplate">> {
   const r = repo(source, signal);
   const remotes = await r.remotes();
   const remote = defaultRemote(remotes);

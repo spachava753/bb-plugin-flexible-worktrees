@@ -1,15 +1,15 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { choicesSchema, inputsSchema, liveBranchesSchema, planResultSchema, planSchema, previewSchema, pullsSchema } from "./inputs";
+import { choicesSchema, inputsSchema, liveBranchesSchema, planResultSchema, planSchema, previewSchema, pullsSchema, templateSchema } from "./inputs";
 export { inputsSchema, planSchema, type Inputs, type Plan } from "./inputs";
 
 const source = z.object({ source: z.string() });
 export const hostContract = defineRpcContract({
-  choices: { input: source, output: choicesSchema.omit({ defaultRoot: true }) },
+  choices: { input: source, output: choicesSchema.omit({ pathTemplate: true }) },
   liveBranches: { input: source, output: liveBranchesSchema },
   pulls: { input: source, output: pullsSchema },
   plan: {
-    input: z.object({ source: z.string(), inputs: inputsSchema, defaultRoot: z.string(), pathKey: z.string().optional(), suggestedBranch: z.string().optional() }),
+    input: z.object({ source: z.string(), inputs: inputsSchema, pathTemplate: templateSchema, pathKey: z.string().optional(), suggestedBranch: z.string().optional() }),
     output: planResultSchema,
   },
   create: {

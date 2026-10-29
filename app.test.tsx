@@ -26,7 +26,7 @@ async function setup(opts: { value?: unknown; fail?: boolean; gh?: boolean; prev
           { name: "colleague/review", remote: "origin", local: false, date: Date.now(), ahead: 0, behind: 0 },
         ],
         worktrees: [{ path: "/repo", branch: "main" }, { path: "/worktrees/review", branch: "(detached)" }],
-        remotes: ["origin"], defaultRemote: "origin", defaultBase: "origin/main", defaultRoot: "/worktrees/{repo}",
+        remotes: ["origin"], defaultRemote: "origin", defaultBase: "origin/main", pathTemplate: "{checkoutParent}/{repo}.{branch}",
       };
     },
     liveBranches: () => ({ branches: [{ remote: "origin", branch: "colleague/review" }, { remote: "origin", branch: "brand-new" }], errors: [] }),
@@ -150,5 +150,41 @@ it("shows input errors instead of a stale \"Checking…\" when inputs become inv
   expect(await screen.findByText("Choose or enter a checkout path")).toBeTruthy();
   expect(screen.queryByText("Checking…")).toBeNull();
   await waitFor(() => expect(lastValue(onChange)).toEqual({ status: "blocked", reason: "Choose or enter a checkout path" }));
+  slot.lifecycle.unmount();
+});
+
+it("overrides the project's template per thread without materializing its defaults", async () => {
+  const { slot, onChange } = await setup();
+  openPicker();
+  fireEvent.click(screen.getByRole("button", { name: /Location/ }));
+  expect(await screen.findByText("Template: {checkoutParent}/{repo}.{branch}")).toBeTruthy();
+  expect((screen.getByLabelText("Parent directory") as HTMLInputElement).placeholder).toBe("From path template");
+  await waitFor(() => expect(lastValue(onChange)).toEqual({ status: "ready", value: { target: "new" } }));
+  fireEvent.change(screen.getByLabelText("Folder name"), { target: { value: "chosen" } });
+  await waitFor(() => expect(lastValue(onChange).value).toEqual({ target: "new", location: { folder: "chosen" } }));
+  fireEvent.change(screen.getByLabelText("Folder name"), { target: { value: "" } });
+  await waitFor(() => expect(lastValue(onChange).value).toEqual({ target: "new" }));
+  slot.lifecycle.unmount();
+});
+
+it("keeps settings help scannable and reveals details without changing configuration", async () => {
+  const app = await loadPluginApp(() => import("./app"));
+  const slot = renderSlot(app.settingsSections[0]!, {});
+  const layouts = within(screen.getByRole("region", { name: "Common path layouts" }));
+  for (const template of ["~/worktrees/{pathKey}", "~/worktrees/{repo}/{pathKey}", "{checkoutParent}/{repo}.{branch}"]) expect(layouts.getByText(template)).toBeTruthy();
+  const variables = screen.getByText("Variables and path rules");
+  const projects = screen.getByText("Per-project override examples");
+  expect((variables.closest("details") as HTMLDetailsElement).open).toBe(false);
+  fireEvent.click(variables);
+  expect((variables.closest("details") as HTMLDetailsElement).open).toBe(true);
+  for (const token of ["{repo}", "{repoPath}", "{checkoutParent}", "{branch}", "{pathKey}"]) {
+    expect(within(variables.closest("details")!).getAllByText(token).length).toBeGreaterThan(0);
+  }
+  expect(screen.getByText("/home/user/GIT/app.feature-login")).toBeTruthy();
+  fireEvent.click(projects);
+  expect(JSON.parse(projects.closest("details")!.querySelector("pre")!.textContent!)).toEqual({
+    "github.com/my-org/*": "{checkoutParent}/{repo}.{branch}", "proj_example": "~/special/{repo}/{pathKey}",
+  });
+  expect(slot.inspection.rpcCalls).toHaveLength(0);
   slot.lifecycle.unmount();
 });

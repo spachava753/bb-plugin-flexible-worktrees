@@ -85,6 +85,58 @@ it("refuses at validation what preview would refuse", async () => {
   await t.harness.lifecycle.dispose();
 });
 
+it("uses the project's template and default source consistently for choices, preview, validation, and creation", async () => {
+  const fixture = makeMessageDispatchHookContext();
+  const host = makeHostResponse();
+  const source = (id: string, path: string, isDefault: boolean) => ({ id, projectId: fixture.project!.id, hostId: host.id, isDefault, path, type: "local_path" as const, createdAt: 0, updatedAt: 0 });
+  const project = { ...fixture.project!, gitRemoteUrl: "git@github.com:team/repo.git", sources: [source("other", "/other", false), source("default", "/repo", true)] };
+  const plannedResult = { plan: { action: "new-branch" as const, source: "/repo", path: "/resolved/feature", branch: "feature", start: "refs/heads/main", startLabel: "main", mergeBaseBranch: "main" }, warnings: [] };
+  const { bb, harness } = createFakePluginHost({
+    pluginId: "flexible-worktrees",
+    settings: { pathTemplate: "~/global/{branch}", projectOverrides: '{"github.com/team/*":"~/team/{repo}.{branch}"}' },
+    sdk: { projects: { get: async () => project }, environments: { list: async () => [] } } as never,
+    experimental_callHostRpc: async ({ method }) => {
+      if (method === "choices") return { branches: [], worktrees: [], remotes: [], defaultBase: "main" };
+      if (method === "plan") return plannedResult;
+      if (method === "create") return { path: plannedResult.plan.path, log: [] };
+      throw new Error(`Unexpected method ${method}`);
+    },
+  });
+  plugin(bb);
+  const scope = { projectId: project.id, hostId: host.id };
+  const planCalls = () => harness.experimental_hostRpcCalls.filter(c => c.method === "plan");
+  expect(await harness.behavior.callRpc("choices", scope)).toMatchObject({ pathTemplate: "~/team/{repo}.{branch}" });
+  expect(harness.experimental_hostRpcCalls.at(-1)).toMatchObject({ hostId: host.id, input: { source: "/repo" } });
+  const inputs = inputsSchema.parse({ target: "new", branch: "feature" });
+  await harness.behavior.callRpc("preview", { ...scope, inputs });
+  expect(planCalls().at(-1)).toMatchObject({ input: { source: "/repo", pathTemplate: "~/team/{repo}.{branch}" } });
+  const provider = harness.registrations.environmentProviders.get("flexible-worktrees")!;
+  const base = { project, host, projectCheckout: { path: "/repo", experimental_ownsPath: false }, gitRemote: null, inputs };
+  expect(await provider.validate!(base)).toEqual({ action: "accept" });
+  expect(planCalls().at(-1)).toMatchObject({ input: { pathTemplate: "~/team/{repo}.{branch}" } });
+  const claim = vi.fn(async () => true);
+  expect((await provider.create({ ...base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", rebuild: false, previous: null, experimental_claimPath: claim, report, signal })).status).toBe("created");
+  expect(claim).toHaveBeenCalledWith("/resolved/feature");
+  expect(planCalls().at(-1)).toMatchObject({ input: { source: "/repo", pathTemplate: "~/team/{repo}.{branch}", pathKey: "key" } });
+  await harness.behavior.setSettings({ projectOverrides: JSON.stringify({ [project.id]: "~/project/{pathKey}" }) });
+  expect(await harness.behavior.callRpc("choices", scope)).toMatchObject({ pathTemplate: "~/project/{pathKey}" });
+  await harness.lifecycle.dispose();
+});
+
+it("validates destination settings before saving and describes them concisely", async () => {
+  const { bb, harness } = createFakePluginHost({ pluginId: "flexible-worktrees" });
+  plugin(bb);
+  const descriptors = harness.registrations.settingsDescriptors;
+  expect(Object.keys(descriptors)).toEqual(["pathTemplate", "projectOverrides", "initSubmodules"]);
+  expect(descriptors.pathTemplate.default).toBe("~/worktrees/{pathKey}");
+  expect(descriptors.pathTemplate.description).toContain("Blank uses ~/worktrees/{pathKey}");
+  await expect(harness.behavior.setSettings({ projectOverrides: '{"project":false}' })).rejects.toThrow();
+  await expect(harness.behavior.setSettings({ pathTemplate: "{unknown}" })).rejects.toThrow();
+  await harness.behavior.setSettings({ pathTemplate: "" });
+  await harness.behavior.setSettings({ pathTemplate: "../{repo}.{branch}" });
+  await harness.lifecycle.dispose();
+});
+
 it("uses only public SDK entrypoints", async () => {
   const result = await experimental_scanPublicSdkOnly(process.cwd(), { allow: [/^vitest$/, /^@testing-library\//, /^react(?:-dom)?(?:\/|$)/, /^@radix-ui\//, /^@hugeicons\//, /^class-variance-authority$/, /^clsx$/, /^tailwind-merge$/, /^@\//] });
   expect(result.violations).toEqual([]);

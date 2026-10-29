@@ -1,12 +1,12 @@
-import { basename, dirname, join } from "node:path";
-import { slug, type Inputs, type Plan, type PlanResult } from "../inputs";
-import { canonical, exists, expand } from "./fs";
+import { basename, dirname } from "node:path";
+import type { Inputs, Plan, PlanResult } from "../inputs";
+import { destinations } from "./destination";
 import { checkoutRoot, repo, type Fetch, type Repo } from "./git";
 import { pullBase, pullDetails, remoteRepo } from "./github";
 import { assertSameLaunch, receipts } from "./receipts";
 import { branchLabel, fetchOf, heads, localBranch, remoteLabel, splitRemoteRef, trackedUpstream, trackingRef, type RemoteBranch } from "./refs";
 
-export type PlanArgs = { source: string; inputs: Inputs; defaultRoot: string; pathKey?: string; suggestedBranch?: string; dataDir?: string };
+export type PlanArgs = { source: string; inputs: Inputs; pathTemplate: string; pathKey?: string; suggestedBranch?: string; dataDir?: string };
 
 /** Everything the per-target planners share. Planners add warnings here and never write refs, config, or files. */
 type Ctx = {
@@ -15,8 +15,8 @@ type Ctx = {
   /** The requested remote, else origin, else the only remote. */
   remote?: string;
   warnings: string[];
-  /** Destination for a folder named after `hint`; empty when the name is only known at launch. */
-  destination(hint: string): Promise<string>;
+  /** Destination whose {branch} is `branch` (empty: BB names it at launch). See destinations(). */
+  destination(branch: string): Promise<string>;
   defaultLabel(): Promise<string>;
 };
 
@@ -38,35 +38,21 @@ export async function plan(args: PlanArgs, signal?: AbortSignal): Promise<PlanRe
   if (inputs.target === "path") {
     return { plan: { action: "attach", source, path: await checkoutRoot(inputs.path, signal), branch: "", start: "", startLabel: "" }, warnings: [] };
   }
-  const ctx = await context(repo(source, signal), inputs, args.defaultRoot);
-  const p = inputs.target === "new" ? await planNew(ctx, inputs.branch || args.suggestedBranch || "", inputs.base, args.pathKey)
+  const ctx = await context(repo(source, signal), inputs, args.pathTemplate, args.pathKey);
+  const p = inputs.target === "new" ? await planNew(ctx, inputs.branch || args.suggestedBranch || "", inputs.base)
     : inputs.target === "branch" ? await planBranch(ctx, inputs.branch, { remote: inputs.remote, localName: inputs.localName, fastForward: inputs.fastForward })
     : await planPull(ctx, inputs.number, inputs.checkout, inputs.remote);
   return { plan: p, warnings: ctx.warnings };
 }
 
-async function context(r: Repo, inputs: Exclude<Inputs, { target: "path" }>, defaultRoot: string): Promise<Ctx> {
+async function context(r: Repo, inputs: Exclude<Inputs, { target: "path" }>, template: string, pathKey?: string): Promise<Ctx> {
   const remotes = await r.remotes();
   if (inputs.remote && (inputs.remote.startsWith("-") || !remotes.includes(inputs.remote))) throw new Error(`\`${inputs.remote}\` isn't a configured Git remote`);
   const remote = inputs.remote || defaultRemote(remotes);
-  // Use the primary checkout's name even when the source is itself a linked worktree.
-  const root = expand((inputs.location?.root || defaultRoot).replaceAll("{repo}", basename(dirname(await r.commonDir()))));
-  const folder = inputs.location?.folder;
   return {
     r, remotes, remote, warnings: [],
-    async destination(hint) {
-      if (folder) {
-        const path = await canonical(join(root, folder));
-        if (await exists(path)) throw new Error(`\`${path}\` already exists. Choose another folder, or pick it under Worktrees to attach it.`);
-        return path;
-      }
-      if (!hint) return "";
-      for (let n = 1; n < 100; n++) {
-        const path = await canonical(join(root, n === 1 ? slug(hint) : `${slug(hint)}-${n}`));
-        if (!await exists(path)) return path;
-      }
-      throw new Error("Too many folders with this name; choose a folder name");
-    },
+    // {repo} is the primary checkout's name even when the source is itself a linked worktree.
+    destination: destinations({ template, source: r.dir, repo: basename(dirname(await r.commonDir())), pathKey, root: inputs.location?.root, folder: inputs.location?.folder }),
     defaultLabel: async () => (await defaultBase(r, remote)).label,
   };
 }
@@ -139,7 +125,7 @@ async function resolveBase({ r, remotes, remote }: Ctx, base: string): Promise<B
   throw unknown(". Use a branch, tag, or commit.");
 }
 
-async function planNew(ctx: Ctx, branch: string, baseInput: string | undefined, pathKey?: string): Promise<Plan> {
+async function planNew(ctx: Ctx, branch: string, baseInput: string | undefined): Promise<Plan> {
   if (branch) {
     await checkBranchName(ctx.r, branch);
     if (await localBranch(ctx.r, branch)) throw new Error(`Branch \`${branch}\` already exists. Pick it from Branches instead.`);
@@ -147,7 +133,7 @@ async function planNew(ctx: Ctx, branch: string, baseInput: string | undefined, 
   const base = baseInput ? await resolveBase(ctx, baseInput) : await defaultBase(ctx.r, ctx.remote, true);
   if (base.warning) ctx.warnings.push(base.warning);
   return {
-    action: "new-branch", source: ctx.r.dir, path: await ctx.destination(branch || pathKey || ""), branch, start: base.start, startLabel: base.label,
+    action: "new-branch", source: ctx.r.dir, path: await ctx.destination(branch), branch, start: base.start, startLabel: base.label,
     ...(base.fetch ? { fetch: base.fetch } : {}), ...(base.start !== "HEAD" ? { mergeBaseBranch: base.diffBase ?? base.label } : {}),
   };
 }

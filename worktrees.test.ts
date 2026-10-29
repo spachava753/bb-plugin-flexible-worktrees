@@ -20,8 +20,10 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(temp, { recursive: true, force: true }); });
 
-const root = () => join(temp, "worktrees", "{repo}");
-const resolve = (inputs: unknown, pathKey?: string) => plan({ source, inputs: inputsSchema.parse(inputs), defaultRoot: root(), suggestedBranch: pathKey ? "bb/test" : undefined, pathKey, dataDir: data });
+// Most tests use branch-named folders; template behavior has its own describe block.
+const template = () => join(temp, "worktrees", "{repo}", "{branch}");
+const resolve = (inputs: unknown, pathKey?: string, pathTemplate = template()) =>
+  plan({ source, inputs: inputsSchema.parse(inputs), pathTemplate, suggestedBranch: pathKey ? "bb/test" : undefined, pathKey, dataDir: data });
 /** Plan and create exactly as a launch does. */
 async function launch(inputs: unknown, pathKey = "test-key") {
   const parsed = inputsSchema.parse(inputs);
@@ -364,4 +366,43 @@ it("derives gh --repo identities from remote URLs", () => {
   expect(repoOf("ssh://git@ghe.example.com:2222/owner/name.git")).toBe("ghe.example.com/owner/name");
   expect(repoOf("https://gitlab.com/group/sub/name.git")).toBeUndefined();
   expect(repoOf("/srv/git/name.git")).toBeUndefined();
+});
+
+describe("path templates", () => {
+  const at = (...parts: string[]) => join(temp, ...parts);
+  it("names folders by launch key, or as checkout siblings by sanitized branch", async () => {
+    expect((await resolve({ target: "new", branch: "x" }, "thr_abc", at("wt", "{pathKey}"))).plan.path).toBe(at("wt", "thr_abc"));
+    expect((await resolve({ target: "new", branch: "feature/login" }, "k", "{checkoutParent}/{repo}.{branch}")).plan.path).toBe(at("repo.feature-login"));
+    expect((await resolve({ target: "new", branch: "feature/login" }, "k", "../{repo}.{branch}")).plan.path).toBe(at("repo.feature-login"));
+    expect((await resolve({ target: "new", branch: "x" }, "k", "{repoPath}/.worktrees/{branch}")).plan.path).toBe(join(source, ".worktrees", "x"));
+  });
+  it("uses the primary checkout's name for {repo} when the source is a linked worktree", async () => {
+    const linked = at("linked");
+    await git(source, ["worktree", "add", "-q", "-b", "side", linked]);
+    const r = await plan({ source: linked, inputs: inputsSchema.parse({ target: "new", branch: "y" }), pathTemplate: at("wt", "{repo}", "{branch}"), pathKey: "k", suggestedBranch: "bb/test" });
+    expect(r.plan.path).toBe(at("wt", "repo", "y"));
+  });
+  it("shows placeholders for names BB assigns at launch, and requires them at launch", async () => {
+    expect((await resolve({ target: "new" }, undefined, at("wt", "{repo}", "{branch}"))).plan.path).toBe(at("wt", "repo", "<automatic branch>"));
+    expect((await resolve({ target: "new", branch: "x" }, undefined, at("wt", "{pathKey}"))).plan.path).toBe(at("wt", "<automatic folder>"));
+    await expect(plan({ source, inputs: inputsSchema.parse({ target: "new" }), pathTemplate: at("wt", "{branch}"), pathKey: "k" })).rejects.toThrow("unresolved");
+  });
+  it("lets the thread override the templated parent and the folder independently", async () => {
+    const tpl = at("wt", "{repo}.{branch}");
+    expect((await resolve({ target: "new", branch: "x", location: { root: "{checkoutParent}/custom" } }, "k", tpl)).plan.path).toBe(at("custom", "repo.x"));
+    expect((await resolve({ target: "new", branch: "x", location: { folder: "chosen" } }, "k", tpl)).plan.path).toBe(at("wt", "chosen"));
+    await expect(resolve({ target: "new", branch: "x", location: { root: "relative/{repo}" } }, "k", tpl)).rejects.toThrow("absolute");
+  });
+  it("keeps the template's folder when the thread's folder override is blank", async () => {
+    for (const folder of ["", "   "]) {
+      expect((await resolve({ target: "new", branch: "x", location: { folder } }, "thr_abc", at("wt", "{pathKey}"))).plan.path).toBe(at("wt", "thr_abc"));
+    }
+  });
+  it("validates the folder name after expansion", async () => {
+    await expect(resolve({ target: "new", branch: "x" }, "k", at("wt", "back\\slash"))).rejects.toThrow("Invalid folder name");
+  });
+  it("rejects templates without a folder or with unknown variables", async () => {
+    await expect(resolve({ target: "new", branch: "x" }, "k", `${at("wt")}/..`)).rejects.toThrow("folder name");
+    await expect(resolve({ target: "new", branch: "x" }, "k", at("wt", "{unknown}"))).rejects.toThrow();
+  });
 });

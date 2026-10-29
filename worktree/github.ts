@@ -1,4 +1,5 @@
 import type { Pull, Pulls } from "../inputs";
+import { remoteIdentity } from "../remotes";
 import { exec, stderr, type Repo } from "./git";
 
 type GhPull = { number: number; title: string; author?: { login?: string }; headRefName: string; baseRefName: string; isCrossRepository: boolean; isDraft: boolean; updatedAt: string; url?: string };
@@ -17,15 +18,10 @@ const toPull = (p: GhPull): Pull => ({
   fork: p.isCrossRepository, draft: p.isDraft, updated: Date.parse(p.updatedAt) || 0,
 });
 
-/** HOST/OWNER/REPO for gh --repo, from a remote URL (scp-like, ssh://, or https://). */
+/** HOST/OWNER/REPO for gh --repo, from a remote URL; undefined unless it has exactly an owner and a repository. */
 export function repoOf(url: string) {
-  const scp = /^[^@/\s]+@([^:/\s]+):([^\s]+?)(?:\.git)?\/?$/.exec(url);
-  let host: string, path: string;
-  if (scp) [host, path] = [scp[1]!, scp[2]!];
-  else {
-    try { const u = new URL(url); [host, path] = [u.hostname, u.pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "")]; } catch { return undefined; }
-  }
-  return host && /^[^/]+\/[^/]+$/.test(path) ? `${host}/${path}` : undefined;
+  const identity = remoteIdentity(url);
+  return identity && identity.split("/").length === 3 ? identity : undefined;
 }
 export const remoteRepo = async (r: Repo, remote: string) => repoOf(await r.remoteUrl(remote));
 

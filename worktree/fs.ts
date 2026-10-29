@@ -4,11 +4,11 @@ import { homedir } from "node:os";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 
-/** Absolute path from an absolute or `~/` path. No other shell expansion. */
-export function expand(path: string) {
+/** Absolute path from an absolute or `~/` path, or a relative one when `relativeTo` is given. No other shell expansion. */
+export function expand(path: string, relativeTo?: string) {
   const expanded = path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
-  if (!isAbsolute(expanded)) throw new Error("Use an absolute path or ~/path");
-  return resolve(expanded);
+  if (!isAbsolute(expanded) && !relativeTo) throw new Error("Use an absolute path or ~/path");
+  return relativeTo ? resolve(relativeTo, expanded) : resolve(expanded);
 }
 /** realpath() that also canonicalizes paths that don't exist yet, through their nearest existing parent. */
 export async function canonical(path: string): Promise<string> {

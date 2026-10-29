@@ -4,7 +4,7 @@ Open **Work on…** beside the environment picker and search once across pull re
 
 ## New tasks start fresh
 
-New branches start from the remote's freshly fetched default branch, not whatever your main checkout happens to be on. Folders are named after the branch, and BB's diff compares against the right base: `origin/main`, the parent branch of a stacked change, or the PR's target.
+New branches start from the remote's freshly fetched default branch, not whatever your main checkout happens to be on. Folders follow your path template, and BB's diff compares against the right base: `origin/main`, the parent branch of a stacked change, or the PR's target.
 
 ## Reviews and handoffs
 
@@ -13,6 +13,10 @@ Pick a PR by title, author, or `#number`, including PRs from forks, without addi
 ## Predictable before launch
 
 A one-line preview says exactly what launching will do. Conflicts such as existing branch names, missing branches, or occupied folders show up there instead of failing the environment later.
+
+## Put worktrees where you want them
+
+Set one path template for every new worktree: unique folders under `~/worktrees` by default, grouped by repository with `~/worktrees/{repo}/{pathKey}`, or next to each checkout with `{checkoutParent}/{repo}.{branch}`. Add per-project templates keyed by BB project ID or remote, including wildcard matches. Override the parent directory or folder name for one thread. The settings page explains every variable with examples.
 
 ## Ready to run
 

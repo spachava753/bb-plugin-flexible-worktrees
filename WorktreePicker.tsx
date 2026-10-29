@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Input } from "./components/ui/input";
 import { Button } from "./components/ui/button";
-import { inputsSchema, type Inputs, type Preview } from "./inputs";
+import { DEFAULT_PATH_TEMPLATE, inputsSchema, type Inputs, type Preview } from "./inputs";
 import { summarize, targetIcon } from "./picker/describe";
 import { LocationFields, PlanStatus, TargetFields } from "./picker/Details";
 import { Listbox, useListbox } from "./picker/Listbox";
@@ -72,7 +72,7 @@ export function WorktreePicker({ form, onChange, preview, checking, onOpen, onRe
               pull={pull} canCheckoutBranch={Boolean(pulls?.available)} showPath={pathEntry || !choices?.worktrees.some(w => form.target === "path" && w.path === form.path)} />
             <PlanStatus checking={checking && parsed.success} blocked={blocked} preview={preview} warnings={warnings} />
             {form.target !== "path" ? <LocationFields id={id} open={advanced} onToggle={() => setAdvanced(!advanced)}
-              root={location?.root ?? ""} folder={location?.folder ?? ""} defaultRoot={choices?.defaultRoot ?? "~/dev/worktrees/{repo}"}
+              root={location?.root ?? ""} folder={location?.folder ?? ""} template={choices?.pathTemplate ?? DEFAULT_PATH_TEMPLATE}
               onChange={(key, value) => {
                 const next = { ...location, [key]: value || undefined };
                 onChange({ ...form, location: next.root || next.folder ? next : undefined });

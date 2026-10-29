@@ -21,7 +21,7 @@ Select a project and machine in **New thread**, then select **Flexible Worktrees
 | **Branches** | Resume or review a branch | Local and remote branches merged into one row each, newest first. A branch already checked out somewhere attaches that worktree. A local branch gets a new worktree and is **fast-forwarded** to its upstream by default when it's behind. A remote-only branch is fetched and tracked. |
 | **Worktrees** | Reuse a checkout | Attaches a detached worktree, or any checkout path you enter, exactly as it is. |
 
-The panel under the list says in one sentence what launching will do and shows warnings, for example unpushed commits. Conflicts that can be predicted, such as an existing branch name, a missing branch, or an occupied folder, block launch here instead of failing the environment later. **Location** sets the parent directory and folder name. Folders are named after the branch (`feature/x` → `feature-x`, PRs → `pr-123`) and get `-2`, `-3`… on collision.
+The panel under the list says in one sentence what launching will do and shows warnings, for example unpushed commits. Conflicts that can be predicted, such as an existing branch name, a missing branch, or an occupied folder, block launch here instead of failing the environment later. Where new worktrees go comes from the project's [path template](#destinations). **Location** overrides the template's parent directory or folder name for one thread.
 
 Branches render instantly from local refs. Opening the picker also queries the remotes (`git ls-remote`, adding *not fetched* rows) and `gh` (pull requests); **Refresh** repeats both. Without `gh` the Pull requests group is hidden, though `#123` still works on GitHub and GitLab remotes through their pull/merge-request refs. If `gh` is installed but signed out, the picker says to run `gh auth login`. Fork PRs need no extra remote.
 
@@ -33,10 +33,64 @@ Paths are resolved on the selected machine, not necessarily the machine running 
 
 Under **Settings → Installed plugins → Flexible Worktrees**, or with `bb plugin config flexible-worktrees set <key> <value>`:
 
-- `defaultRoot` (default `~/dev/worktrees/{repo}`): the parent directory for new worktrees. `{repo}` expands to the primary checkout's directory name.
+- `pathTemplate` (default `~/worktrees/{pathKey}`): where new worktrees go. See [Destinations](#destinations).
+- `projectOverrides` (default `{}`): per-project templates. See [Per-project templates](#per-project-templates).
 - `initSubmodules` (default `true`): runs `git submodule update --init --recursive` in new worktrees.
 
 Settings are read on each creation; no reload is required.
+
+## Destinations
+
+`pathTemplate` is the **complete path, including the new worktree's folder name**. Unset, empty, or whitespace-only uses `~/worktrees/{pathKey}`, which gives each launch a unique folder. The settings page has a **Template reference** with common layouts.
+
+```sh
+# Grouped by repository
+bb plugin config flexible-worktrees set pathTemplate '~/worktrees/{repo}/{pathKey}'
+
+# Siblings of each source checkout, named after repository and branch
+bb plugin config flexible-worktrees set pathTemplate '{checkoutParent}/{repo}.{branch}'
+```
+
+For a source checkout `/home/user/GIT/app`, branch `feature/login`, and launch key `thr_abc123`:
+
+| Variable | Meaning | Expanded value |
+| --- | --- | --- |
+| `{repo}` | Primary checkout directory's name, even if BB's source is a linked worktree | `app` |
+| `{repoPath}` | Absolute, canonical root of BB's source checkout on the selected machine | `/home/user/GIT/app` |
+| `{checkoutParent}` | Parent directory of that source checkout | `/home/user/GIT` |
+| `{branch}` | The worktree's **local** branch, sanitized for the filesystem; detached PR worktrees use `pr-<number>`. The Git branch name is unchanged | `feature-login` |
+| `{pathKey}` | BB's unique launch key, assigned at launch | `thr_abc123` |
+
+Templates are expanded by substituting each variable, expanding a leading `~` to the selected machine's home, and resolving a relative path from `{repoPath}`:
+
+| Template | Result for the example above |
+| --- | --- |
+| `~/worktrees/{pathKey}` | `/home/user/worktrees/thr_abc123` |
+| `~/worktrees/{repo}/{pathKey}` | `/home/user/worktrees/app/thr_abc123` |
+| `{checkoutParent}/{repo}.{branch}` | `/home/user/GIT/app.feature-login` |
+| `../{repo}.{branch}` | `/home/user/GIT/app.feature-login` |
+| `{repoPath}/.worktrees/{branch}` | `/home/user/GIT/app/.worktrees/feature-login` |
+
+For `{branch}`, `/`, `\`, and filesystem-reserved punctuation become `-`. Only the listed single-brace variables are supported, not shell variables or filters; unknown variables are rejected. Nothing is appended to the expanded template. If a folder made from the template already exists, `-2`, `-3`… is appended. An explicit **Folder name** that already exists is refused. Names BB assigns at launch (an automatic branch, `{pathKey}`) appear as `<automatic …>` placeholders in the picker's preview.
+
+**Location** overrides parts of the template for one thread: **Parent directory** (variables allowed; it must expand to an absolute path or `~/path`) and **Folder name** (one literal name). Blank fields keep the template's parts, and defaults are never copied into the thread's inputs. `path` targets ignore templates.
+
+### Per-project templates
+
+Set `projectOverrides` to a JSON object mapping BB project IDs or remote identities to full templates. This is user configuration stored by BB, never a file committed to the repository:
+
+```json
+{
+  "github.com/my-org/*": "{repoPath}/.worktrees/{branch}",
+  "proj_example": "~/special/{repo}/{pathKey}"
+}
+```
+
+```sh
+bb plugin config flexible-worktrees set projectOverrides '{"github.com/my-org/*":"{repoPath}/.worktrees/{branch}"}'
+```
+
+Remote matches use BB's saved project remote URL; no network lookup is performed. HTTPS, SSH, and scp-style Git URLs normalize to `host/owner/repo`, with a lowercase host and without the trailing `.git`. URL keys are accepted too. `*` matches any characters. A project-ID entry wins over remote entries, exact remote matches win over wildcards, and otherwise the pattern with the most non-wildcard characters wins. Equal-specificity matches use lexical key order. Without a matching entry, the global `pathTemplate` applies. An empty project entry uses the built-in default `~/worktrees/{pathKey}` for that project.
 
 ### Preparing new worktrees
 
@@ -71,7 +125,7 @@ The provider uses BB's normal thread command. `--environment-inputs` takes one o
 { "target": "path", "path": "~/dev/other-clone" }
 ```
 
-Creating targets accept `"location": { "root": "~/wt/{repo}", "folder": "x" }`. `remote` defaults to `origin`, or the only remote.
+Creating targets accept `"location": { "root": "~/wt/{repo}", "folder": "x" }` to override the path template's parent directory (variables allowed) or folder name (one literal name). `remote` defaults to `origin`, or the only remote.
 
 ```sh
 bb thread spawn --project <project-id> \
@@ -80,7 +134,11 @@ bb thread spawn --project <project-id> \
   --prompt 'Review this PR'
 ```
 
-Earlier inputs (`"mode": ...`) are no longer accepted. Rebuilding an environment created by an earlier version fails without touching its files. Start a new thread with `{"target":"path","path":"<old worktree>"}` instead.
+### Upgrading from 0.2.x
+
+- Environment inputs are now intent-level targets. Earlier inputs (`"mode": ...`) are no longer accepted, and rebuilding an environment created by an earlier version fails without touching its files. Start a new thread with `{"target":"path","path":"<old worktree>"}` instead.
+- `pathTemplate` and `projectOverrides` keep working unchanged. A folder made from the template that already exists now gets `-2`, `-3`… instead of being refused.
+- Git installs tracking `^0.2.0` do not select 0.3.x. Change the source range to `^0.3.0`. Don't remove the installed plugin just to change its range: removal deletes its BB settings.
 
 ## Development and installation
 

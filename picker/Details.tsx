@@ -46,16 +46,21 @@ export function PlanStatus({ checking, blocked, preview, warnings }: { checking:
   </div>;
 }
 
-export function LocationFields({ id, open, onToggle, root, folder, defaultRoot, onChange }: {
-  id: string; open: boolean; onToggle(): void; root: string; folder: string; defaultRoot: string; onChange(key: "root" | "folder", value: string): void;
+/** Per-thread overrides of the project's path template; blank fields keep the template's parts. */
+export function LocationFields({ id, open, onToggle, root, folder, template, onChange }: {
+  id: string; open: boolean; onToggle(): void; root: string; folder: string; template: string; onChange(key: "root" | "folder", value: string): void;
 }) {
   return <div className="grid gap-2">
     <button type="button" aria-expanded={open} onClick={onToggle} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
       <Icon kind="chevron" className={open ? "" : "-rotate-90"} /> Location
     </button>
-    {open && <div className="grid grid-cols-2 gap-3">
-      <Field id={`${id}-root`} label="Parent directory" value={root} placeholder={defaultRoot} onChange={v => onChange("root", v)} />
-      <Field id={`${id}-folder`} label="Folder name" value={folder} placeholder="From branch name" onChange={v => onChange("folder", v)} />
-    </div>}
+    {open && <>
+      <div className="grid grid-cols-2 gap-3">
+        <Field id={`${id}-root`} label="Parent directory" value={root} placeholder="From path template" onChange={v => onChange("root", v)} />
+        <Field id={`${id}-folder`} label="Folder name" value={folder} placeholder="From path template" onChange={v => onChange("folder", v)} />
+      </div>
+      <p className="text-xs text-muted-foreground">Blank fields use the path template. Edit either to override that part for this thread.</p>
+      <p className="break-all font-mono text-xs text-muted-foreground">Template: {template}</p>
+    </>}
   </div>;
 }
