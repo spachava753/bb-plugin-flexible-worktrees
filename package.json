@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-flexible-worktrees",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "license": "MIT",
   "author": "Shashank Pachava (https://github.com/spachava753)",
@@ -18,7 +18,7 @@
   },
   "bb": {
     "name": "Flexible Worktrees",
-    "description": "Reuse existing checkouts or create worktrees with configurable directories, folder names, and branches.",
+    "description": "Work on a pull request, branch, or new task in its own worktree, placed by your path template, or reuse a checkout.",
     "branding": {
       "icon": "./assets/icon.svg"
     },

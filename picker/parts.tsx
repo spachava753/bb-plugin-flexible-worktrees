@@ -17,7 +17,7 @@ export function Icon({ kind, className = "" }: { kind: IconKind; className?: str
 
 /** Render `code` spans from plan descriptions and messages. */
 export function Text({ children }: { children: string }) {
-  return <>{children.split("`").map((part, i) => i % 2 ? <code key={i} className="break-all rounded bg-muted px-1 font-mono text-[11px]">{part}</code> : part)}</>;
+  return <>{children.split("`").map((part, i) => i % 2 ? <code key={i} className="break-words rounded bg-muted px-1 font-mono text-[11px]">{part}</code> : part)}</>;
 }
 
 export function Row({ icon, title, detail }: { icon: IconKind; title: string; detail?: string }) {
