@@ -13,7 +13,8 @@ export const hostContract = defineRpcContract({
     output: planResultSchema,
   },
   create: {
-    input: z.object({ plan: planSchema, inputs: inputsSchema, pathKey: z.string(), initSubmodules: z.boolean() }),
+    // `restore` reattaches only what an earlier create left behind; it refuses instead of creating anew.
+    input: z.object({ plan: planSchema, inputs: inputsSchema, pathKey: z.string(), initSubmodules: z.boolean(), restore: z.boolean().optional() }),
     output: z.object({ path: z.string(), log: z.array(z.string()) }),
   },
 });

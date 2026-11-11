@@ -66,6 +66,33 @@ export default function plugin(bb: BbPluginApi) {
     return checkAttach(result, projectId, hostId);
   }
 
+  type LaunchContext = {
+    project: Pick<Project, "id" | "gitRemoteUrl">; host: { id: string }; projectCheckout: { path: string }; inputs: Inputs; pathKey: string; signal: AbortSignal;
+    report: { step(message: string): void; log(message: string): void }; experimental_claimPath(path: string): Promise<boolean>;
+  };
+  /** Create a new environment, or (with `previousPath`) restore a destroyed one from the files it left behind. */
+  async function launch(ctx: LaunchContext, { suggestedBranch, previousPath }: { suggestedBranch?: string; previousPath?: string | null }) {
+    const options = { hostId: ctx.host.id, signal: ctx.signal, timeoutMs: 1_800_000 };
+    const restore = previousPath !== undefined;
+    ctx.report.step(restore ? "Resolving retained workspace" : "Resolving workspace");
+    const { plan: p, warnings } = await checkAttach(await host.call("plan", {
+      source: ctx.projectCheckout.path, inputs: ctx.inputs, pathTemplate: await templateFor(ctx.project),
+      pathKey: ctx.pathKey, ...(suggestedBranch ? { suggestedBranch } : {}),
+    }, { ...options, timeoutMs: 180_000 }), ctx.project.id, ctx.host.id);
+    if (restore && previousPath && p.path !== previousPath) {
+      return { status: "failed" as const, message: `This thread's inputs now resolve to \`${shortPath(p.path)}\`, not its previous \`${shortPath(previousPath)}\`. Nothing was changed; start a new thread to work there.` };
+    }
+    for (const warning of warnings) ctx.report.log(warning);
+    if (!await ctx.experimental_claimPath(p.path)) return { status: "failed" as const, message: "Another launch reserved this path. Choose a different folder or reuse its environment." };
+    ctx.report.step(p.action === "attach" ? "Attaching existing checkout (no Git changes)" : restore ? `Reattaching worktree at ${p.path}` : `Creating worktree at ${p.path}`);
+    const result = await host.call("create", { plan: p, inputs: ctx.inputs, pathKey: ctx.pathKey, initSubmodules: (await settings.get()).initSubmodules, ...(restore ? { restore } : {}) }, options);
+    for (const line of result.log) ctx.report.log(line);
+    return {
+      status: "created" as const, path: result.path, ownsPath: p.action !== "attach",
+      ...(p.mergeBaseBranch ? { mergeBaseBranch: p.mergeBaseBranch } : {}),
+    };
+  }
+
   bb.rpc.register(rpcContract, {
     async choices({ projectId, hostId }) {
       const { source, pathTemplate } = await scope(projectId, hostId);
@@ -96,23 +123,9 @@ export default function plugin(bb: BbPluginApi) {
       }
       return { action: "accept" };
     },
-    async create(ctx) {
-      const options = { hostId: ctx.host.id, signal: ctx.signal, timeoutMs: 1_800_000 };
-      ctx.report.step("Resolving workspace");
-      const { plan: p, warnings } = await checkAttach(await host.call("plan", {
-        source: ctx.projectCheckout.path, inputs: ctx.inputs, pathTemplate: await templateFor(ctx.project),
-        pathKey: ctx.pathKey, suggestedBranch: ctx.suggestedBranchName,
-      }, { ...options, timeoutMs: 180_000 }), ctx.project.id, ctx.host.id);
-      for (const warning of warnings) ctx.report.log(warning);
-      if (!await ctx.experimental_claimPath(p.path)) return { status: "failed", message: "Another launch reserved this path. Choose a different folder or reuse its environment." };
-      ctx.report.step(p.action === "attach" ? "Attaching existing checkout (no Git changes)" : `Creating worktree at ${p.path}`);
-      const result = await host.call("create", { plan: p, inputs: ctx.inputs, pathKey: ctx.pathKey, initSubmodules: (await settings.get()).initSubmodules }, options);
-      for (const line of result.log) ctx.report.log(line);
-      return {
-        status: "created", path: result.path, ownsPath: p.action !== "attach",
-        ...(p.mergeBaseBranch ? { mergeBaseBranch: p.mergeBaseBranch } : {}),
-      };
-    },
+    create: ctx => launch(ctx, { suggestedBranch: ctx.suggestedBranchName }),
+    // Files are always retained, so restoring reattaches them; it never recreates a worktree or moves a checkout.
+    restore: ctx => launch(ctx, { previousPath: ctx.previous.environment.path }),
     async remove() {
       // Intentionally non-destructive, including cancellation and explicit environment deletion.
       // User-chosen directories and branches remain available outside BB.

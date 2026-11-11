@@ -104,6 +104,22 @@ it("refuses to attach a checkout another provider's environment owns in the same
   }
 });
 
+it("restores a destroyed environment only at its previous path, asking the host to reattach rather than create", async () => {
+  for (const action of ["attach", "detached"] as const) {
+    const t = launch(action, method => method === "plan" ? planned(action) : { path: "/canonical/repo", log: [] });
+    const restore = (path: string | null) => t.provider.restore!({ ...t.base, thread: makeThreadResponse(), attempt: 1, pathKey: "key", previous: { environment: { path } as never, resource: null }, experimental_claimPath: t.claim, report, signal });
+    expect(await restore("/canonical/repo")).toEqual(expect.objectContaining({ status: "created", path: "/canonical/repo", ownsPath: action !== "attach" }));
+    const calls = t.harness.experimental_hostRpcCalls;
+    expect(calls.find(c => c.method === "plan")!.input).not.toHaveProperty("suggestedBranch");
+    expect(calls.find(c => c.method === "create")!.input).toMatchObject({ restore: true, pathKey: "key" });
+
+    t.claim.mockClear();
+    expect(await restore("/somewhere/else")).toEqual({ status: "failed", message: expect.stringContaining("not its previous") });
+    expect(t.claim).not.toHaveBeenCalled();
+    await t.harness.lifecycle.dispose();
+  }
+});
+
 it("refuses at validation what preview would refuse", async () => {
   const t = launch("detached", () => { throw new Error("PR #7 wasn't found"); });
   expect(await t.provider.validate!(t.base)).toEqual({ action: "refuse", message: expect.stringContaining("PR #7 wasn't found") });

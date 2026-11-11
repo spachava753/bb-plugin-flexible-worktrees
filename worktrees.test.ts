@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readdir, rm, writeFile, readFile, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { inputsSchema } from "./contract";
 import { choices, liveBranches } from "./worktree/choices";
 import { create } from "./worktree/create";
@@ -299,6 +299,26 @@ describe("existing checkouts and safety", () => {
     await expect(resolve({ target: "new", branch: "second" }, "test-key")).rejects.toThrow("different worktree");
     await expect(create({ plan: { ...r.plan, path: join(temp, "elsewhere") }, inputs: inputsSchema.parse({ target: "new", branch: "first" }), pathKey: "test-key", initSubmodules: true }, data)).rejects.toThrow("different worktree");
     expect(await branchAt(r.path)).toBe("first");
+  });
+  it("restores only the worktree a launch left behind, without changing it", async () => {
+    const first = await launch({ target: "new" });
+    await writeFile(join(first.path, "work"), "agent");
+    const inputs = inputsSchema.parse({ target: "new" });
+    // A restore has no suggested branch name; the receipt supplies the plan.
+    const { plan: p } = await plan({ source, inputs, pathTemplate: template(), pathKey: "test-key", dataDir: data });
+    expect(p).toEqual(first.plan);
+    expect(await create({ plan: p, inputs, pathKey: "test-key", initSubmodules: true, restore: true }, data)).toEqual({ path: first.path, log: [] });
+    expect(await readFile(join(first.path, "work"), "utf8")).toBe("agent");
+
+    await rm(first.path, { recursive: true, force: true });
+    await expect(create({ plan: p, inputs, pathKey: "test-key", initSubmodules: true, restore: true }, data)).rejects.toThrow("no longer exists");
+    expect(await readdir(dirname(first.path))).toEqual([]);
+
+    const fresh = inputsSchema.parse({ target: "new", branch: "never-created" });
+    const { plan: unrecorded } = await resolve(fresh, "other-key");
+    await expect(create({ plan: unrecorded, inputs: fresh, pathKey: "other-key", initSubmodules: true, restore: true }, data)).rejects.toThrow("no worktree on record");
+    expect(await list(source)).toHaveLength(2);
+    expect(await git(source, ["branch", "--list", "never-created"])).toBe("");
   });
   it("honors cancellation before mutating", async () => {
     const inputs = inputsSchema.parse({ target: "new", branch: "x" });
