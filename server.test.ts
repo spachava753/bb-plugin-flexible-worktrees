@@ -31,7 +31,7 @@ function launch(action: Plan["action"], hostRpc: (method: string) => unknown, en
   const base = { project: fixture.project!, host: makeHostResponse(), projectCheckout: { path: "/repo", experimental_ownsPath: false }, gitRemote: null, inputs };
   return {
     harness, claim, provider, base,
-    create: () => provider.create({ ...base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", rebuild: false, previous: null, experimental_claimPath: claim, report, signal }),
+    create: () => provider.create({ ...base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", experimental_claimPath: claim, report, signal }),
   };
 }
 const planned = (action: Plan["action"]): { plan: Plan; warnings: string[] } => ({
@@ -71,7 +71,7 @@ it("refuses to attach a path another provider manages, warns when sharing, and f
 
   const logs: string[] = [];
   const shared = launch("attach", attach, () => [env("project-checkout", false), env("flexible-worktrees", true)]);
-  const created = await shared.provider.create({ ...shared.base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", rebuild: false, previous: null, experimental_claimPath: shared.claim, report: { step() {}, log: line => logs.push(line) }, signal });
+  const created = await shared.provider.create({ ...shared.base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", experimental_claimPath: shared.claim, report: { step() {}, log: line => logs.push(line) }, signal });
   expect(created).toEqual(expect.objectContaining({ status: "created", ownsPath: false }));
   expect(logs.join("\n")).toContain("Another BB environment already uses this checkout");
   await shared.harness.lifecycle.dispose();
@@ -97,7 +97,7 @@ it("refuses to attach a checkout another provider's environment owns in the same
     const logs: string[] = [];
     const t = launch("attach", attach, () => envs);
     expect(await t.provider.validate!(t.base)).toEqual({ action: "accept" });
-    const created = await t.provider.create({ ...t.base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", rebuild: false, previous: null, experimental_claimPath: t.claim, report: { step() {}, log: line => logs.push(line) }, signal });
+    const created = await t.provider.create({ ...t.base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", experimental_claimPath: t.claim, report: { step() {}, log: line => logs.push(line) }, signal });
     expect(created).toEqual(expect.objectContaining({ status: "created", ownsPath: false }));
     expect(logs.join("\n")).toContain("Another BB environment already uses this checkout");
     await t.harness.lifecycle.dispose();
@@ -140,7 +140,7 @@ it("uses the project's template and default source consistently for choices, pre
   expect(await provider.validate!(base)).toEqual({ action: "accept" });
   expect(planCalls().at(-1)).toMatchObject({ input: { pathTemplate: "~/team/{repo}.{branch}" } });
   const claim = vi.fn(async () => true);
-  expect((await provider.create({ ...base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", rebuild: false, previous: null, experimental_claimPath: claim, report, signal })).status).toBe("created");
+  expect((await provider.create({ ...base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", experimental_claimPath: claim, report, signal })).status).toBe("created");
   expect(claim).toHaveBeenCalledWith("/resolved/feature");
   expect(planCalls().at(-1)).toMatchObject({ input: { source: "/repo", pathTemplate: "~/team/{repo}.{branch}", pathKey: "key" } });
   await harness.behavior.setSettings({ projectOverrides: JSON.stringify({ [project.id]: "~/project/{pathKey}" }) });
