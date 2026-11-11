@@ -13,8 +13,8 @@ export const hostContract = defineRpcContract({
     output: planResultSchema,
   },
   create: {
-    // `restore` reattaches only what an earlier create left behind; it refuses instead of creating anew.
-    input: z.object({ plan: planSchema, inputs: inputsSchema, pathKey: z.string(), initSubmodules: z.boolean(), restore: z.boolean().optional() }),
+    // `restoreFrom` is a destroyed environment's pathKey: reattach the worktree it left behind, never create one.
+    input: z.object({ plan: planSchema, inputs: inputsSchema, pathKey: z.string(), initSubmodules: z.boolean(), restoreFrom: z.string().optional() }),
     output: z.object({ path: z.string(), log: z.array(z.string()) }),
   },
 });

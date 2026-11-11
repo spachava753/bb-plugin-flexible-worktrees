@@ -7,27 +7,24 @@ import { provision } from "./provision";
 import { assertSameLaunch, receipts, type Receipt } from "./receipts";
 import { localBranch, remoteLabel } from "./refs";
 
-export type CreateArgs = { plan: Plan; inputs: Inputs; pathKey: string; initSubmodules: boolean; restore?: boolean };
+export type CreateArgs = { plan: Plan; inputs: Inputs; pathKey: string; initSubmodules: boolean; restoreFrom?: string };
 type Launch = CreateArgs & { r: Repo; store: ReturnType<typeof receipts>; receipt: Receipt };
 
-/**
- * Carry out a plan. Idempotent per pathKey: a retry resumes the worktree its first attempt created.
- * `restore` only resumes that worktree; it never creates one, since a missing worktree was removed outside BB.
- */
-export async function create({ plan: p, inputs, pathKey, initSubmodules, restore }: CreateArgs, dataDir: string, signal?: AbortSignal) {
+/** Carry out a plan. Idempotent per pathKey: a retry resumes the worktree its first attempt created. */
+export async function create(args: CreateArgs, dataDir: string, signal?: AbortSignal) {
+  const { plan: p, inputs, pathKey, initSubmodules } = args;
   signal?.throwIfAborted();
   if (p.action === "attach") return { path: await checkoutRoot(p.path, signal), log: [] as string[] };
   if (!p.path) throw new Error("Destination is unresolved");
+  if (args.restoreFrom !== undefined) return reattach(args, args.restoreFrom, dataDir, signal);
   const store = receipts(dataDir, pathKey);
   const recorded = await store.read();
   if (recorded) assertSameLaunch(recorded, inputs, p);
-  else if (restore) throw new Error("This thread has no worktree on record to restore. Nothing was changed; start a new thread instead.");
   const launch: Launch = { plan: p, inputs, pathKey, initSubmodules, r: repo(p.source, signal), store, receipt: recorded ?? { inputs, plan: p, provisioned: false } };
   if (await exists(p.path)) {
     if (!recorded) throw new Error("Destination already exists. Pick it under Worktrees to attach it; nothing was overwritten.");
     return { path: p.path, log: await resume(launch) };
   }
-  if (restore) throw new Error(`\`${p.path}\` no longer exists, so there's nothing to restore. Nothing was changed; start a new thread instead.`);
   const { log, fastForwardTo, start } = await prepare(launch);
   if (!recorded) await store.write(launch.receipt, true);
   await checkout(launch, start);
@@ -35,6 +32,24 @@ export async function create({ plan: p, inputs, pathKey, initSubmodules, restore
   if (fastForwardTo) log.push(await fastForward(p.path, p.branch, fastForwardTo, signal));
   log.push(...await finish(launch));
   return { path: p.path, log };
+}
+
+/**
+ * Restore: reattach the worktree recorded under a destroyed environment's pathKey, and record it under the new
+ * environment's key so later restores find it. Never creates a worktree: a missing one was removed outside BB.
+ */
+async function reattach({ plan: p, inputs, pathKey, initSubmodules }: CreateArgs, from: string, dataDir: string, signal?: AbortSignal) {
+  const previous = await receipts(dataDir, from).read();
+  if (!previous) throw new Error("This thread has no worktree on record to restore. Nothing was changed; start a new thread instead.");
+  assertSameLaunch(previous, inputs, p);
+  if (!await exists(p.path)) throw new Error(`\`${p.path}\` no longer exists, so there's nothing to restore. Nothing was changed; start a new thread instead.`);
+  const r = repo(p.source, signal);
+  await assertOwned(p, r);
+  const store = receipts(dataDir, pathKey);
+  // A retry of this restore finds the receipt it already copied.
+  const current = await store.read();
+  if (current) assertSameLaunch(current, inputs, p); else await store.write(previous, true);
+  return { path: p.path, log: await resume({ plan: p, inputs, pathKey, initSubmodules, r, store, receipt: current ?? previous }) };
 }
 
 /** A retry or rebuild of a launch whose worktree already exists. */

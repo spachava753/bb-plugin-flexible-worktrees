@@ -12,7 +12,7 @@ Safety contract:
 - Provisioning (submodules, `.worktreeinclude`) runs once per created worktree, never overwrites files, and never fails the launch.
 - The provider never deletes directories or branches, including cancellation/cleanup.
 - Refuse existing destinations unless the path-key ownership receipt and Git worktree identity match a prior create. Retries reuse the receipt's plan.
-- `restore` only reattaches what a prior create left at the same path (receipt-verified worktree, or the same attached checkout); it never creates a replacement.
+- `restore` never creates a worktree: it reattaches the receipt-verified worktree found by the previous environment's key (core gives restores a fresh `pathKey` and clears the old path), copying the receipt to the new key; attached checkouts re-resolve from their inputs.
 - Claim canonical destination paths through core before mutation. Run Git with argv, not a shell.
 - Keep lifecycle state in BB core. Host receipts identify filesystem ownership only.
 - Do not silently change retention policy or enable destructive cleanup.

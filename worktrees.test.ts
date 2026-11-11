@@ -300,25 +300,32 @@ describe("existing checkouts and safety", () => {
     await expect(create({ plan: { ...r.plan, path: join(temp, "elsewhere") }, inputs: inputsSchema.parse({ target: "new", branch: "first" }), pathKey: "test-key", initSubmodules: true }, data)).rejects.toThrow("different worktree");
     expect(await branchAt(r.path)).toBe("first");
   });
-  it("restores only the worktree a launch left behind, without changing it", async () => {
-    const first = await launch({ target: "new" });
+  it("restores only the worktree a destroyed launch left behind, under core's fresh key, without changing it", async () => {
+    const first = await launch({ target: "new" }, "thr");
     await writeFile(join(first.path, "work"), "agent");
     const inputs = inputsSchema.parse({ target: "new" });
-    // A restore has no suggested branch name; the receipt supplies the plan.
-    const { plan: p } = await plan({ source, inputs, pathTemplate: template(), pathKey: "test-key", dataDir: data });
-    expect(p).toEqual(first.plan);
-    expect(await create({ plan: p, inputs, pathKey: "test-key", initSubmodules: true, restore: true }, data)).toEqual({ path: first.path, log: [] });
+    // Core restores with a fresh key and no suggested branch; the previous key's receipt supplies the plan.
+    const restore = async (from: string, to: string) => {
+      const { plan: p } = await plan({ source, inputs, pathTemplate: template(), pathKey: from, dataDir: data });
+      return create({ plan: p, inputs, pathKey: to, initSubmodules: true, restoreFrom: from }, data);
+    };
+    expect(await restore("thr", "thr-2")).toEqual({ path: first.path, log: [] });
+    expect(await restore("thr", "thr-2")).toEqual({ path: first.path, log: [] }); // a retry of the same restore
+    expect(await restore("thr-2", "thr-3")).toEqual({ path: first.path, log: [] }); // restoring the restored environment
     expect(await readFile(join(first.path, "work"), "utf8")).toBe("agent");
+    expect(await list(source)).toHaveLength(2);
 
     await rm(first.path, { recursive: true, force: true });
-    await expect(create({ plan: p, inputs, pathKey: "test-key", initSubmodules: true, restore: true }, data)).rejects.toThrow("no longer exists");
+    await expect(restore("thr-3", "thr-4")).rejects.toThrow("no longer exists");
     expect(await readdir(dirname(first.path))).toEqual([]);
 
-    const fresh = inputsSchema.parse({ target: "new", branch: "never-created" });
-    const { plan: unrecorded } = await resolve(fresh, "other-key");
-    await expect(create({ plan: unrecorded, inputs: fresh, pathKey: "other-key", initSubmodules: true, restore: true }, data)).rejects.toThrow("no worktree on record");
+    // Without a receipt (e.g. the branch target originally attached a checkout), restore never creates a worktree.
+    const unrecorded = inputsSchema.parse({ target: "branch", branch: "main" });
+    await git(source, ["switch", "-q", "-c", "elsewhere"]);
+    const { plan: p } = await plan({ source, inputs: unrecorded, pathTemplate: template(), pathKey: "never", dataDir: data });
+    expect(p.action).toBe("local-branch");
+    await expect(create({ plan: p, inputs: unrecorded, pathKey: "never-2", initSubmodules: true, restoreFrom: "never" }, data)).rejects.toThrow("no worktree on record");
     expect(await list(source)).toHaveLength(2);
-    expect(await git(source, ["branch", "--list", "never-created"])).toBe("");
   });
   it("honors cancellation before mutating", async () => {
     const inputs = inputsSchema.parse({ target: "new", branch: "x" });
