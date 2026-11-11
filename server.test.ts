@@ -57,7 +57,9 @@ it("owns created worktrees and reports the merge base, but never owns attached c
   }
 });
 
-const env = (providerId: string, managed: boolean) => ({ status: "ready", lifecycle: { phase: "active" }, managed, workspaceProvisionType: managed ? "managed-worktree" : "unmanaged", environmentProviderId: providerId });
+const env = (providerId: string | null, managed: boolean, projectId = "other-project", id = `env_${providerId}`) => ({
+  id, projectId, status: "ready", lifecycle: { phase: "active" }, managed, workspaceProvisionType: managed ? "managed-worktree" : "unmanaged", environmentProviderId: providerId,
+});
 
 it("refuses to attach a path another provider manages, warns when sharing, and fails closed when it can't tell", async () => {
   const attach = (method: string) => method === "plan" ? planned("attach") : { path: "/canonical/repo", log: [] };
@@ -77,6 +79,29 @@ it("refuses to attach a path another provider manages, warns when sharing, and f
   const unknown = launch("attach", attach, () => { throw new Error("database busy"); });
   expect(await unknown.provider.validate!(unknown.base)).toEqual({ action: "refuse", message: expect.stringContaining("database busy") });
   await unknown.harness.lifecycle.dispose();
+});
+
+it("refuses to attach a checkout another provider's environment owns in the same project, but only warns otherwise", async () => {
+  const attach = (method: string) => method === "plan" ? planned("attach") : { path: "/canonical/repo", log: [] };
+  const projectId = makeMessageDispatchHookContext().project!.id;
+
+  const owned = launch("attach", attach, () => [env("project-checkout", false, projectId, "env_kb")]);
+  const refusal = await owned.provider.validate!(owned.base);
+  expect(refusal).toEqual({ action: "refuse", message: expect.stringContaining('owned by the "project-checkout" environment provider (environment env_kb)') });
+  expect(refusal).toEqual({ action: "refuse", message: expect.stringContaining("bb environment delete env_kb") });
+  await expect(owned.create()).rejects.toThrow("project-checkout");
+  expect(owned.claim).not.toHaveBeenCalled();
+  await owned.harness.lifecycle.dispose();
+
+  for (const envs of [[env("project-checkout", false, "other-project")], [env("flexible-worktrees", false, projectId)], [env(null, false, projectId)]]) {
+    const logs: string[] = [];
+    const t = launch("attach", attach, () => envs);
+    expect(await t.provider.validate!(t.base)).toEqual({ action: "accept" });
+    const created = await t.provider.create({ ...t.base, thread: makeThreadResponse(), suggestedBranchName: "bb/test", attempt: 1, pathKey: "key", rebuild: false, previous: null, experimental_claimPath: t.claim, report: { step() {}, log: line => logs.push(line) }, signal });
+    expect(created).toEqual(expect.objectContaining({ status: "created", ownsPath: false }));
+    expect(logs.join("\n")).toContain("Another BB environment already uses this checkout");
+    await t.harness.lifecycle.dispose();
+  }
 });
 
 it("refuses at validation what preview would refuse", async () => {
