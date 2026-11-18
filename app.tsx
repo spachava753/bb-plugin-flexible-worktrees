@@ -36,7 +36,8 @@ function InputsForm(props: PluginEnvironmentProviderInputsProps) {
 export default definePluginApp(app => {
   app.slots.settingsSection({ id: "template-reference", title: "Template reference", component: TemplateReference });
   // Off unless the showStatusBar setting is on; sits beside GitHub PR Status's segment (group 2_pullRequest).
-  app.slots.experimental_threadContextSegment({
+  // BB versions without context segments skip it, keeping the environment provider's inputs working.
+  app.slots.experimental_threadContextSegment?.({
     id: "pull-request-status", title: "Pull request status", group: "2_pullRequest", order: 20,
     summary: Summary, action: Action, details: Details, useVisible,
   });

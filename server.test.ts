@@ -193,6 +193,19 @@ describe("pull request status", () => {
     return { harness, invalidate, read };
   }
 
+  it("still loads, without polling, on BB versions that lack watched reads", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "flexible-worktrees",
+      sdk: { environments: { get: async () => environment() } } as never,
+      experimental_callHostRpc: async () => prRow("open"),
+    });
+    (bb.rpc as { experimental_whileWatched?: unknown }).experimental_whileWatched = undefined;
+    plugin(bb);
+    expect(harness.registrations.environmentProviders.has("flexible-worktrees")).toBe(true);
+    expect(await harness.behavior.callRpc("pullRequestStatus", { keys: ["env_pr"] })).toMatchObject({ env_pr: { outcome: "available" } });
+    await harness.lifecycle.dispose();
+  });
+
   it("asks the environment's machine, passing the PR target so detached checkouts keep their PR", async () => {
     const t = setup(() => environment(), () => prRow("open"));
     expect(await t.read()).toMatchObject({ outcome: "available", pullRequest: { number: 7 } });
