@@ -81,7 +81,7 @@ export function registerPrStatus(bb: BbPluginApi, host: ExperimentalHostClient<t
         ? { ...previous.row, refreshError: fresh.message }
         : fresh;
       cache.set(environmentId, { row, at: Date.now() });
-      if (previous && !same(previous.row, row)) bb.rpc.experimental_invalidate([statusTag(environmentId)]);
+      if (previous && !same(previous.row, row)) bb.rpc.experimental_invalidate?.([statusTag(environmentId)]);
       return row;
     }).finally(() => inflight.delete(environmentId));
     inflight.set(environmentId, next);
@@ -112,8 +112,12 @@ export function registerPrStatus(bb: BbPluginApi, host: ExperimentalHostClient<t
         return { ok: true as const };
       },
     },
-    /** Call after registering the RPC contract. */
+    /**
+     * Call after registering the RPC contract. BB versions without watched reads skip polling (reads still refresh
+     * stale rows), so the plugin, and its environment provider, keep loading there.
+     */
     watch() {
+      if (typeof bb.rpc.experimental_whileWatched !== "function") return;
       bb.rpc.experimental_whileWatched("pullRequestStatus", async (read, signal) => {
         if (!("key" in read)) return;
         const id = read.key;

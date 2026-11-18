@@ -1,8 +1,13 @@
 import { useState, type ReactNode } from "react";
 import {
-  UrlLink, experimental_Icon as Icon, experimental_useRpcKeyedQuery, experimental_useRpcMutation, useSettings,
+  UrlLink, experimental_Icon as Icon, useSettings,
   type ExperimentalThreadContextSegmentInput, type ExperimentalThreadContextSegmentProps, type PluginRpcContract,
 } from "@get-bb/plugin-sdk/app";
+// Through the namespace, not by name: a git install builds this bundle against the installing BB's SDK, and a named
+// import that SDK lacks (these arrived in 0.6.65) fails the whole build. Only the bar's components call them, and
+// they never mount on a BB without context segments (see app.tsx).
+import * as sdk from "@get-bb/plugin-sdk/app";
+const { experimental_useRpcKeyedQuery: useRpcKeyedQuery, experimental_useRpcMutation: useRpcMutation } = sdk;
 import { cn } from "../lib/utils";
 import { z } from "zod";
 import { STATUS_BAR_SETTING, statusContract, type Check, type PullRequest, type Stack, type StatusRow } from "../status";
@@ -33,7 +38,7 @@ const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "numeri
 /** The environment's PR row, or null when the setting is off or there's nothing to show. */
 export function usePullRequestStatus(environmentId: string | null): Row | null {
   const enabled = useSettings().values?.[STATUS_BAR_SETTING] === true;
-  const { data } = experimental_useRpcKeyedQuery({
+  const { data } = useRpcKeyedQuery({
     contract: statusContract, method: "pullRequestStatus", keys: enabled && environmentId ? [environmentId] : [],
   });
   const row = enabled && environmentId ? data?.[environmentId] : undefined;
@@ -47,7 +52,7 @@ export const useVisible = ({ environment }: ExperimentalThreadContextSegmentInpu
  */
 function useShowsDiff(environmentId: string, pr: PullRequest, segments: ExperimentalThreadContextSegmentProps["segments"]) {
   const gitShown = segments.some(s => s.key === GIT_CHANGES);
-  const { data } = experimental_useRpcKeyedQuery({ pluginId: "bb--git", contract: gitContract, method: "status", keys: gitShown ? [environmentId] : [] });
+  const { data } = useRpcKeyedQuery({ pluginId: "bb--git", contract: gitContract, method: "status", keys: gitShown ? [environmentId] : [] });
   const workspace = gitShown ? data?.[environmentId]?.workspace : undefined;
   if (!workspace || workspace.workingTree.hasUncommittedChanges || !workspace.mergeBase) return true;
   return workspace.mergeBase.insertions !== pr.additions || workspace.mergeBase.deletions !== pr.deletions;
@@ -152,7 +157,7 @@ const Branch = ({ name }: { name: string }) =>
 function Header({ row, environmentId, segments }: { row: Row; environmentId: string; segments: ExperimentalThreadContextSegmentProps["segments"] }) {
   const { pullRequest: pr } = row;
   const showDiff = useShowsDiff(environmentId, pr, segments);
-  const refresh = experimental_useRpcMutation({ contract: statusContract, method: "refreshPullRequestStatus" });
+  const refresh = useRpcMutation({ contract: statusContract, method: "refreshPullRequestStatus" });
   // Only the author is known, not who merged or closed it.
   const commits = plural(pr.commits, "commit");
   const by = pr.author || "someone";
