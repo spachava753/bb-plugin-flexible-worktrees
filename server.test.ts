@@ -217,6 +217,46 @@ describe("pull request status", () => {
     const offline = setup(() => environment(), () => { throw new Error("host offline"); });
     expect(await offline.read()).toMatchObject({ outcome: "unavailable", message: expect.stringContaining("host offline") });
     await offline.harness.lifecycle.dispose();
+    const unknown = setup(() => { throw new Error("database busy"); }, () => prRow("open"));
+    expect(await unknown.read()).toMatchObject({ outcome: "unavailable", message: expect.stringContaining("database busy") });
+    await unknown.harness.lifecycle.dispose();
+  });
+
+  it("keeps showing the last PR, marked, when a refresh fails, until a read succeeds", async () => {
+    let fail = false;
+    const t = setup(() => environment(), () => {
+      if (fail) return { outcome: "unavailable", message: "GitHub didn’t answer in time.", fetchedAt: 2 };
+      return prRow("open");
+    });
+    await t.read();
+    fail = true;
+    await t.harness.behavior.callRpc("refreshPullRequestStatus", { environmentId: "env_pr" });
+    expect(await t.read()).toMatchObject({ outcome: "available", pullRequest: { number: 7 }, fetchedAt: 1, refreshError: "GitHub didn’t answer in time." });
+    expect(t.invalidate).toHaveBeenLastCalledWith(["pr-status:env_pr"]);
+    fail = false;
+    await t.harness.behavior.callRpc("refreshPullRequestStatus", { environmentId: "env_pr" });
+    expect(await t.read()).not.toHaveProperty("refreshError");
+    expect(t.harness.experimental_hostRpcCalls).toHaveLength(3);
+    await t.harness.lifecycle.dispose();
+  });
+
+  it("limits how many machines one batched read asks at once", async () => {
+    let running = 0, peak = 0;
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "flexible-worktrees",
+      sdk: { environments: { get: async ({ environmentId }: { environmentId: string }) => environment({ id: environmentId }) } } as never,
+      experimental_callHostRpc: async () => {
+        peak = Math.max(peak, ++running);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        running--;
+        return prRow("open");
+      },
+    });
+    plugin(bb);
+    const keys = Array.from({ length: 12 }, (_, i) => `env_${i}`);
+    expect(Object.keys(await harness.behavior.callRpc("pullRequestStatus", { keys }) as object)).toEqual(keys);
+    expect(peak).toBe(4);
+    await harness.lifecycle.dispose();
   });
 
   it("re-reads watched rows and refreshes clients only when the row changes", async () => {

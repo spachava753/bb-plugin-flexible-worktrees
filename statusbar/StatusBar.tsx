@@ -8,8 +8,8 @@ import { Text } from "../picker/parts";
 import { STATUS_BAR_SETTING, statusContract, type Local, type PullRequest } from "../status";
 import { CHECK_ICON, STATE, TONE, checksLabel, checksShort, formatCount, mergeLabel, reviewLabel, summaryText, syncLabel, type Label } from "./describe";
 
-const BODY_ID = "flexible-worktrees-pr-status-body";
-const TOGGLE_ID = "flexible-worktrees-pr-status-toggle";
+/** Per thread: split layouts show several threads' bars at once. */
+const ids = (threadId: string) => ({ toggle: `flexible-worktrees-pr-status-toggle-${threadId}`, body: `flexible-worktrees-pr-status-body-${threadId}` });
 
 /** The environment's PR row, or null when the setting is off or there's nothing to show. */
 export function usePullRequestStatus(environmentId: string | null) {
@@ -29,18 +29,22 @@ export const Diffstat = ({ pr }: { pr: PullRequest }) => <span className="shrink
   <span className="text-diff-added">+{formatCount(pr.additions)}</span> <span className="text-diff-removed">−{formatCount(pr.deletions)}</span>
 </span>;
 
-export function Summary({ environment, isExpanded, onToggle }: ExperimentalThreadContextSegmentProps) {
+export function Summary({ threadId, environment, isExpanded, onToggle }: ExperimentalThreadContextSegmentProps) {
   const row = usePullRequestStatus(environment?.id ?? null);
   if (!row) return null;
-  const { pullRequest: pr, local } = row;
+  const { pullRequest: pr, local, refreshError } = row;
+  const { toggle, body } = ids(threadId);
   const checks = checksLabel(pr);
   const review = reviewLabel(pr);
   const sync = local.sync;
-  return <button type="button" id={TOGGLE_ID} aria-expanded={isExpanded} aria-controls={BODY_ID} aria-label={summaryText(pr, local)} onClick={onToggle}
+  return <button type="button" id={toggle} aria-expanded={isExpanded} aria-controls={body} aria-label={summaryText(pr, local, refreshError)} onClick={onToggle}
     className={cn("flex min-h-6 min-w-0 flex-1 cursor-pointer items-center gap-1.5 overflow-hidden rounded px-2 py-1 text-xs transition-colors hover:bg-state-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       isExpanded ? "text-foreground" : "text-muted-foreground")}>
     <StateIcon pr={pr} />
     <span className="shrink-0">#{pr.number}</span>
+    {refreshError && <span title={`Not refreshed: ${refreshError}`} className="flex shrink-0 text-muted-foreground">
+      <Icon name="AlertTriangle" aria-hidden="true" className="size-3.5 shrink-0" />
+    </span>}
     {pr.state !== "open" && <span className="shrink-0" data-promptbox-hide-compact="">{STATE[pr.state].label}</span>}
     <Sep /><Diffstat pr={pr} />
     {pr.checks.state !== "none" && <>
@@ -85,12 +89,13 @@ const CHECK_CLASS = { fail: "text-destructive-text", pending: "text-warning", pa
 const CHECK_GLYPH = { fail: "CircleX", pending: "Clock", pass: "CircleCheck", skipped: "Circle", neutral: "Circle" } as const;
 const SHOWN_CHECKS = 6;
 
-export function Details({ environment, isExpanded }: ExperimentalThreadContextSegmentProps) {
+export function Details({ threadId, environment, isExpanded }: ExperimentalThreadContextSegmentProps) {
   const row = usePullRequestStatus(environment?.id ?? null);
   const refresh = experimental_useRpcMutation({ contract: statusContract, method: "refreshPullRequestStatus" });
   if (!row || !isExpanded) return null;
-  const { pullRequest: pr, local } = row;
-  return <section id={BODY_ID} role="region" aria-labelledby={TOGGLE_ID} className="grid gap-2 border-t border-border bg-popover px-3 pb-2 pt-2 text-xs">
+  const { pullRequest: pr, local, refreshError } = row;
+  const { toggle, body } = ids(threadId);
+  return <section id={body} role="region" aria-labelledby={toggle} className="grid gap-2 border-t border-border bg-popover px-3 pb-2 pt-2 text-xs">
     <div className="flex min-w-0 items-start gap-2">
       <StateIcon pr={pr} className="mt-0.5" />
       <div className="grid min-w-0 flex-1 gap-0.5">
@@ -107,6 +112,10 @@ export function Details({ environment, isExpanded }: ExperimentalThreadContextSe
         <Icon name="ArrowReloadHorizontal" aria-hidden="true" className={cn("size-3.5", refresh.isPending && "animate-spin")} />
       </button>
     </div>
+    {refreshError && <p className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
+      <Icon name="AlertTriangle" aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+      <span className="min-w-0"><Text>{`Couldn’t refresh, showing status from ${new Date(row.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. ${refreshError}`}</Text></span>
+    </p>}
     <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1">
       <Line label="Diff on GitHub"><Diffstat pr={pr} /> in {formatCount(pr.changedFiles)} {pr.changedFiles === 1 ? "file" : "files"} · {formatCount(pr.commits)} {pr.commits === 1 ? "commit" : "commits"}</Line>
       <Line label="Checks"><Checks pr={pr} /></Line>

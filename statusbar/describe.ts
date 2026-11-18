@@ -22,12 +22,15 @@ export function checksLabel({ checks }: PullRequest): Label {
   const parts = [failed && `${formatCount(failed)} failing`, pending && `${formatCount(pending)} running`, passed && `${formatCount(passed)} passed`].filter(Boolean);
   const skipped = total - failed - pending - passed;
   if (skipped) parts.push(`${formatCount(skipped)} skipped`);
+  // GitHub's rollup sets the state; a failure or run beyond the listed checks still shows.
+  if (state === "failing" && !failed) parts.unshift("Failing");
+  if (state === "pending" && !pending && !failed) parts.unshift("Running");
   return { text: parts.join(", "), tone: state === "failing" ? "bad" : state === "pending" ? "waiting" : "good" };
 }
 /** Compact checks count for the bar: failures, else running, else passed of total. */
 export function checksShort({ checks }: PullRequest) {
-  if (checks.state === "failing") return `${formatCount(checks.failed)} failing`;
-  if (checks.state === "pending") return `${formatCount(checks.pending)} running`;
+  if (checks.state === "failing") return checks.failed ? `${formatCount(checks.failed)} failing` : "Failing";
+  if (checks.state === "pending") return checks.pending ? `${formatCount(checks.pending)} running` : "Running";
   return `${formatCount(checks.passed)}/${formatCount(checks.total)}`;
 }
 export const CHECK_ICON: Record<PullRequest["checks"]["state"], string> = {
@@ -69,7 +72,7 @@ export function syncLabel(local: Local): Label {
 }
 
 /** One sentence for the bar's accessible name. */
-export function summaryText(pr: PullRequest, local: Local) {
+export function summaryText(pr: PullRequest, local: Local, refreshError?: string) {
   return [
     `PR #${pr.number}, ${STATE[pr.state].label}`,
     `+${formatCount(pr.additions)} −${formatCount(pr.deletions)} on GitHub`,
@@ -77,5 +80,6 @@ export function summaryText(pr: PullRequest, local: Local) {
     ...(pr.stack ? [`stack layer ${pr.stack.position} of ${pr.stack.size}`] : []),
     ...(reviewLabel(pr) ? [reviewLabel(pr)!.text] : []),
     ...(local.sync && !local.sync.ahead && !local.sync.behind ? [] : [`checkout: ${syncLabel(local).text}`]),
+    ...(refreshError ? [`not refreshed: ${refreshError.replaceAll("`", "")}`] : []),
   ].join("; ");
 }

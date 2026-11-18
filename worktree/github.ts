@@ -13,12 +13,14 @@ export async function gh<T>(r: Repo, args: string[]): Promise<T> {
   });
   return JSON.parse(stdout) as T;
 }
-/** A user-facing reason a gh command failed. */
+/** A short, user-facing reason a gh command failed. Never echoes the command line, which can hold a whole query. */
 export function ghFailure(error: unknown) {
-  if ((error as NodeJS.ErrnoException).code === "ENOENT") return "Install the GitHub CLI (gh) on this machine to see pull request status.";
-  const reason = stderr(error);
+  const e = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string; stderr?: unknown; cmd?: unknown };
+  if (e.code === "ENOENT") return "Install the GitHub CLI (gh) on this machine to see pull request status.";
+  if (e.killed || e.signal === "SIGTERM") return "GitHub didn’t answer in time.";
+  const reason = e.cmd === undefined && error instanceof Error ? error.message : String(e.stderr ?? "").split("\n").map(s => s.replace(/^(gh: |error: )/, "").trim()).find(Boolean) ?? "";
   if (/auth login|not logged in|authentication/i.test(reason)) return "Run `gh auth login` on this machine to see pull request status.";
-  return `Couldn’t load pull request status: ${reason || (error as Error).message || "unknown error"}`;
+  return `Couldn’t load pull request status${reason ? `: ${reason.slice(0, 300)}` : "."}`;
 }
 const toPull = (p: GhPull): Pull => ({
   number: p.number, title: p.title, author: p.author?.login ?? "", head: p.headRefName, base: p.baseRefName,

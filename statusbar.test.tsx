@@ -50,6 +50,14 @@ it("stays hidden, and reads nothing, until the setting is on", async () => {
   slot.lifecycle.unmount();
 });
 
+it("keeps the last PR visible, marked, when a refresh failed", async () => {
+  const slot = await mount({ ...available, refreshError: "GitHub didn’t answer in time." }, { showStatusBar: true });
+  const toggle = await screen.findByRole("button", { name: /not refreshed: GitHub didn’t answer in time\.$/ });
+  fireEvent.click(toggle);
+  expect(within(screen.getByRole("region")).getByText(/Couldn’t refresh, showing status from .*GitHub didn’t answer in time\./)).toBeTruthy();
+  slot.lifecycle.unmount();
+});
+
 it("hides when the checkout has no PR", async () => {
   const slot = await mount({ outcome: "absent", fetchedAt: 1 }, { showStatusBar: true });
   await waitFor(() => expect(slot.inspection.rpcCalls.length).toBeGreaterThan(0));
@@ -80,6 +88,7 @@ it("shows a detached PR's GitHub diff, checks, and stack at a glance, with detai
   expect(details.getByText("Matches the PR head")).toBeTruthy();
   expect(details.getByText("aaaaaaaaaa")).toBeTruthy();
 
+  expect(toggle.getAttribute("aria-controls")).toBe("flexible-worktrees-pr-status-body-thr_1");
   fireEvent.click(details.getByRole("button", { name: "Refresh pull request status" }));
   await waitFor(() => expect(slot.inspection.rpcCalls.some(c => c.method === "refreshPullRequestStatus")).toBe(true));
   slot.lifecycle.unmount();

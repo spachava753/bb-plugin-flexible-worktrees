@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { git } from "./worktree/git";
-import { prStatus } from "./worktree/status";
+import { prStatus, setGitVersionForTesting } from "./worktree/status";
 import { checksLabel, mergeLabel, syncLabel } from "./statusbar/describe";
 import type { PullRequest } from "./status";
 
@@ -57,7 +57,7 @@ function graphql(overrides: Record<string, unknown> = {}) {
     reviewDecision: "CHANGES_REQUESTED", reviewRequests: { totalCount: 1 }, comments: { totalCount: 4 },
     reviewThreads: { nodes: [{ isResolved: false }, { isResolved: true }] },
     mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED", autoMergeRequest: null, isInMergeQueue: false,
-    lastCommit: { nodes: [{ commit: { statusCheckRollup: { contexts: { totalCount: 4, nodes: [
+    lastCommit: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE", contexts: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [
       { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS", detailsUrl: "https://ci/lint", checkSuite: { workflowRun: { workflow: { name: "CI" } } } },
       { __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "FAILURE", detailsUrl: "https://ci/test", checkSuite: { workflowRun: { workflow: { name: "CI" } } } },
       { __typename: "CheckRun", name: "e2e", status: "IN_PROGRESS", conclusion: null, detailsUrl: null, checkSuite: null },
@@ -113,16 +113,16 @@ it("keeps the environment's PR after new commits on the detached head, and repor
 
 it("finds a branch's PR through gh, and reports a PR head this checkout hasn't fetched", async () => {
   await git(source, ["switch", "-c", "widgets"]);
-  await scenario({ view: { json: { url: "https://github.com/acme/widget/pull/7", state: "OPEN", headRefName: "widgets" } }, graphql: [graphql({ headRefOid: "f".repeat(40) })] });
+  await scenario({ view: { json: { url: "https://github.com/acme/widget/pull/7", state: "OPEN", headRefOid: "f".repeat(40) } }, graphql: [graphql({ headRefOid: "f".repeat(40) })] });
   const row = await prStatus({ path: source });
   expect(row).toMatchObject({ outcome: "available", source: "branch", local: { branch: "widgets", sync: null } });
-  expect((await calls())[0]).toEqual(["pr", "view", "--json", "url,state,headRefName"]);
+  expect((await calls())[0]).toEqual(["pr", "view", "--json", "url,state,headRefOid"]);
 });
 
 it("shows nothing for a branch without a PR or an old closed PR on the default branch", async () => {
   await scenario({ view: { stderr: "no pull requests found for branch \"main\"" } });
   expect(await prStatus({ path: source })).toMatchObject({ outcome: "absent" });
-  await scenario({ view: { json: { url: "https://github.com/acme/widget/pull/1", state: "MERGED", headRefName: "main" } } });
+  await scenario({ view: { json: { url: "https://github.com/acme/widget/pull/1", state: "MERGED", headRefOid: "0".repeat(40) } } });
   expect(await prStatus({ path: source })).toMatchObject({ outcome: "absent" });
   expect((await calls()).every(args => args[0] === "pr")).toBe(true);
 });
@@ -138,7 +138,7 @@ it("drops stack fields on GitHub hosts that don't have them", async () => {
   const oid = await head(source);
   await git(source, ["update-ref", "refs/flexible-worktrees/pr/origin/7", oid]);
   await git(source, ["checkout", "--detach"]);
-  const { stack: _, stackEntry: __, isInMergeQueue: ___, ...reduced } = graphql({ headRefOid: oid }).json.data.repository.pullRequest as Record<string, unknown>;
+  const { stack: _, stackEntry: __, ...reduced } = graphql({ headRefOid: oid }).json.data.repository.pullRequest as Record<string, unknown>;
   await scenario({ graphql: [
     { stderr: "gh: Field 'stack' doesn't exist on type 'PullRequest'", stdout: "{\"errors\":[]}" },
     { json: { data: { repository: { pullRequest: reduced } } } },
@@ -148,7 +148,94 @@ it("drops stack fields on GitHub hosts that don't have them", async () => {
   const queries = (await calls()).map(args => args.find(a => a.startsWith("query="))!);
   expect(queries).toHaveLength(2);
   expect(queries[0]).toContain("stackEntry");
-  expect(queries[1]).not.toMatch(/stack|isInMergeQueue/);
+  // Only the rejected group is dropped.
+  expect(queries[1]).not.toMatch(/stack/);
+  expect(queries[1]).toContain("isInMergeQueue");
+});
+
+describe("partial clones", () => {
+  afterEach(() => setGitVersionForTesting(undefined));
+  async function blobless() {
+    await git(source, ["config", "uploadpack.allowFilter", "true"]);
+    const clone = join(temp, "blobless");
+    await git(temp, ["clone", "-q", "--filter=blob:none", `file://${source}`, clone]);
+    // The PR head exists only on the promisor remote.
+    await commit(source, "pushed after the clone");
+    const prHead = await head(source);
+    await git(clone, ["switch", "-q", "-c", "widgets"]);
+    await scenario({ view: { json: { url: "https://github.com/acme/widget/pull/7", state: "OPEN", headRefOid: prHead } }, graphql: [graphql({ headRefOid: prHead })] });
+    const packs = async () => (await git(clone, ["count-objects", "-v"])).match(/packs: (\d+)/)![1];
+    return { clone, prHead, packs, before: await packs() };
+  }
+  // Git 2.44 and older ignore GIT_NO_LAZY_FETCH, so the read must not touch the missing commit at all.
+  it.each([["current Git", undefined], ["Git 2.44", [2, 44]]] as const)("never fetches missing objects (%s)", async (_, version) => {
+    setGitVersionForTesting(version ? [...version] : undefined);
+    const { clone, prHead, packs, before } = await blobless();
+    // This Git honors GIT_NO_LAZY_FETCH either way, so trace commands to prove the old-Git path never reads ancestry.
+    const trace = join(temp, "git-trace.log");
+    process.env.GIT_TRACE = trace;
+    try {
+      expect(await prStatus({ path: clone })).toMatchObject({ outcome: "available", local: { branch: "widgets", sync: null } });
+    } finally { delete process.env.GIT_TRACE; }
+    const ancestry = (await readFile(trace, "utf8")).split("\n").filter(line => /built-in: git (rev-list|merge-base)/.test(line));
+    expect(ancestry).toHaveLength(version ? 0 : 1);
+    expect(await packs()).toBe(before);
+    await expect(git(clone, ["cat-file", "-e", prHead], undefined, undefined, { GIT_NO_LAZY_FETCH: "1" })).rejects.toThrow();
+  });
+});
+
+it("counts every page of checks, keeps the latest run of each, and trusts GitHub's rollup state", async () => {
+  const oid = await head(source);
+  await git(source, ["update-ref", "refs/flexible-worktrees/pr/origin/7", oid]);
+  await git(source, ["checkout", "-q", "--detach"]);
+  const run = (name: string, conclusion: string, startedAt: string) => ({ __typename: "CheckRun", name, status: "COMPLETED", conclusion, detailsUrl: null, startedAt, checkSuite: { workflowRun: { event: "pull_request", workflow: { name: "CI" } } } });
+  const rollup = (state: string, nodes: unknown[], hasNextPage: boolean) => ({ nodes: [{ commit: { statusCheckRollup: { state, contexts: { pageInfo: { hasNextPage, endCursor: hasNextPage ? "cursor1" : null }, nodes } } } }] });
+  await scenario({ graphql: [
+    // The first run of test failed and was re-run successfully.
+    graphql({ headRefOid: oid, lastCommit: rollup("FAILURE", [run("test", "FAILURE", "2026-11-18T01:00:00Z"), run("test", "SUCCESS", "2026-11-18T02:00:00Z")], true) }),
+    { json: { data: { repository: { pullRequest: { headRefOid: oid, lastCommit: rollup("FAILURE", [run("deploy", "FAILURE", "2026-11-18T01:00:00Z")], false) } } } } },
+  ] });
+  const row = await prStatus({ path: source });
+  if (row.outcome !== "available") throw new Error(JSON.stringify(row));
+  expect(row.pullRequest.checks).toMatchObject({ state: "failing", failed: 1, passed: 1, total: 2 });
+  expect(row.pullRequest.checks.items.map(c => `${c.state}:${c.name}`)).toEqual(["fail:CI / deploy", "pass:CI / test"]);
+  const second = (await calls())[1]!;
+  expect(second).toContain("after=cursor1");
+  expect(second.find(a => a.startsWith("query="))).not.toContain("reviewThreads");
+  // A listed failure wins over a green rollup, so the bar is never green beside a red check.
+  await writeFile(logFile, "");
+  await scenario({ graphql: [graphql({ headRefOid: oid, lastCommit: rollup("SUCCESS", [run("lint", "FAILURE", "2026-11-18T01:00:00Z")], false) })] });
+  const green = await prStatus({ path: source });
+  expect(green.outcome === "available" && green.pullRequest.checks.state).toBe("failing");
+});
+
+it("ignores a merged PR once its reused branch has moved past it, but not right after merging", async () => {
+  const merged = await head(source);
+  await git(source, ["switch", "-q", "-c", "staging"]);
+  const view = { json: { url: "https://github.com/acme/widget/pull/3", state: "MERGED", headRefOid: merged } };
+  await scenario({ view, graphql: [graphql({ number: 3, state: "MERGED", headRefOid: merged })] });
+  expect(await prStatus({ path: source })).toMatchObject({ outcome: "available", pullRequest: { number: 3, state: "merged" } });
+  await commit(source, "next release");
+  await scenario({ view });
+  expect(await prStatus({ path: source })).toMatchObject({ outcome: "absent" });
+});
+
+it("asks gh which repository a detached PR target belongs to when several remotes have that number", async () => {
+  await git(source, ["remote", "add", "upstream", "https://github.com/upstream/widget.git"]);
+  const prHead = await head(source);
+  for (const remote of ["origin", "upstream"]) await git(source, ["update-ref", `refs/flexible-worktrees/pr/${remote}/7`, prHead]);
+  await git(source, ["checkout", "-q", "--detach"]);
+  await commit(source, "local fix");
+  await scenario({ view: { json: { url: "https://github.com/upstream/widget/pull/7" } }, graphql: [graphql({ headRefOid: prHead })] });
+  expect(await prStatus({ path: source, pr: { number: 7 } })).toMatchObject({ outcome: "available", source: "target" });
+  const [view, query] = await calls();
+  expect(view).toEqual(["pr", "view", "7", "--json", "url"]);
+  expect(query).toEqual(expect.arrayContaining(["owner=upstream"]));
+  // With the target's remote known, gh isn't asked.
+  await writeFile(logFile, "");
+  await scenario({ graphql: [graphql({ headRefOid: prHead })] });
+  await prStatus({ path: source, pr: { number: 7, remote: "origin" } });
+  expect((await calls()).map(args => args[0])).toEqual(["api"]);
 });
 
 it("describes checks, merge blockers, and local sync for the bar", () => {
@@ -157,6 +244,7 @@ it("describes checks, merge blockers, and local sync for the bar", () => {
   expect(mergeLabel(pr)).toEqual({ text: "Behind main", tone: "bad" });
   expect(mergeLabel({ ...pr, mergeable: "conflicting" })?.text).toBe("Merge conflicts");
   expect(mergeLabel({ ...pr, state: "merged" })).toBeNull();
+  expect(checksLabel({ ...pr, checks: { ...pr.checks, state: "failing" } }).text).toBe("Failing, 2 running, 5 passed, 1 skipped");
   expect(syncLabel({ branch: null, head: "a", sync: { ahead: 0, behind: 2 } }).text).toBe("2 commits behind the PR");
   expect(syncLabel({ branch: "x", head: "a", sync: { ahead: 1, behind: 1 } }).text).toBe("Diverged from the PR head: 1 local commit, 1 PR commit");
 });
