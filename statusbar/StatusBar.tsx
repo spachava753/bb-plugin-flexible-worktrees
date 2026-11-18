@@ -61,7 +61,7 @@ export function Summary({ environment, isExpanded, onToggle }: ExperimentalThrea
     </span>}
     {sync && (sync.ahead > 0 || sync.behind > 0) && <span className="contents" data-promptbox-hide-compact="">
       <Sep />
-      <span className="shrink-0 whitespace-nowrap text-warning" title={syncLabel(local).text.replaceAll("`", "")}>
+      <span className="shrink-0 whitespace-nowrap text-warning" title={syncLabel(local).text}>
         {sync.ahead > 0 && `↑${sync.ahead}`}{sync.ahead > 0 && sync.behind > 0 && " "}{sync.behind > 0 && `↓${sync.behind}`}
       </span>
     </span>}
@@ -82,7 +82,7 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
 }
 const Toned = ({ label }: { label: Label }) => <span className={TONE[label.tone]}><Text>{label.text}</Text></span>;
 const CHECK_CLASS = { fail: "text-destructive-text", pending: "text-warning", pass: "text-success-foreground", skipped: "text-muted-foreground", neutral: "text-muted-foreground" } as const;
-const CHECK_GLYPH = { fail: "CircleX", pending: "Clock", pass: "CircleCheck", skipped: "CircleSlash", neutral: "Circle" } as const;
+const CHECK_GLYPH = { fail: "CircleX", pending: "Clock", pass: "CircleCheck", skipped: "Circle", neutral: "Circle" } as const;
 const SHOWN_CHECKS = 6;
 
 export function Details({ environment, isExpanded }: ExperimentalThreadContextSegmentProps) {
@@ -104,7 +104,7 @@ export function Details({ environment, isExpanded }: ExperimentalThreadContextSe
       <button type="button" aria-label="Refresh pull request status" title="Refresh" disabled={refresh.isPending}
         onClick={() => { void refresh.mutate({ environmentId: environment!.id }).catch(() => undefined); }}
         className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-subtle-foreground transition-colors hover:bg-state-active hover:text-foreground disabled:cursor-default disabled:opacity-60">
-        <Icon name="RefreshCw" aria-hidden="true" className={cn("size-3.5", refresh.isPending && "animate-spin")} />
+        <Icon name="ArrowReloadHorizontal" aria-hidden="true" className={cn("size-3.5", refresh.isPending && "animate-spin")} />
       </button>
     </div>
     <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1">
@@ -177,6 +177,6 @@ function StackMap({ pr }: { pr: PullRequest }) {
 function LocalSync({ local }: { local: Local }) {
   return <span className="grid gap-0.5">
     <Toned label={syncLabel(local)} />
-    <span className="font-mono text-muted-foreground">{local.head.slice(0, 10)}</span>
+    <span className="min-w-0 truncate font-mono text-muted-foreground">{local.branch ? `${local.branch} · ` : ""}{local.head.slice(0, 10)}</span>
   </span>;
 }

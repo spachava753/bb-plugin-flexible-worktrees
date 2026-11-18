@@ -77,7 +77,8 @@ it("shows a detached PR's GitHub diff, checks, and stack at a glance, with detai
   const stack = within(details.getByRole("list", { name: "Stack #3" }));
   expect(stack.getAllByRole("listitem").map(li => li.textContent)).toEqual(["3#8 Widget UI", "2#7 Add widgets (this PR)", "1#6 Auth", "main"]);
   expect(stack.getByRole("link", { name: "#8 Widget UI" }).getAttribute("href")).toBe("https://github.com/acme/widget/pull/8");
-  expect(details.getByText("Detached HEAD matches the PR head")).toBeTruthy();
+  expect(details.getByText("Matches the PR head")).toBeTruthy();
+  expect(details.getByText("aaaaaaaaaa")).toBeTruthy();
 
   fireEvent.click(details.getByRole("button", { name: "Refresh pull request status" }));
   await waitFor(() => expect(slot.inspection.rpcCalls.some(c => c.method === "refreshPullRequestStatus")).toBe(true));

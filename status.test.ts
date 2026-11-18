@@ -157,6 +157,6 @@ it("describes checks, merge blockers, and local sync for the bar", () => {
   expect(mergeLabel(pr)).toEqual({ text: "Behind main", tone: "bad" });
   expect(mergeLabel({ ...pr, mergeable: "conflicting" })?.text).toBe("Merge conflicts");
   expect(mergeLabel({ ...pr, state: "merged" })).toBeNull();
-  expect(syncLabel({ branch: null, head: "a", sync: { ahead: 0, behind: 2 } }).text).toBe("Detached HEAD is 2 commits behind the PR");
-  expect(syncLabel({ branch: "x", head: "a", sync: { ahead: 1, behind: 1 } }).text).toBe("`x` diverged from the PR head: 1 local commit, 1 PR commit");
+  expect(syncLabel({ branch: null, head: "a", sync: { ahead: 0, behind: 2 } }).text).toBe("2 commits behind the PR");
+  expect(syncLabel({ branch: "x", head: "a", sync: { ahead: 1, behind: 1 } }).text).toBe("Diverged from the PR head: 1 local commit, 1 PR commit");
 });
