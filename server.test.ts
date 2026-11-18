@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFakePluginHost, makeMessageDispatchHookContext, makeThreadResponse, makeHostResponse, experimental_scanPublicSdkOnly } from "@get-bb/plugin-sdk/testing";
 import plugin from "./server";
 import { inputsSchema } from "./contract";
@@ -164,11 +164,92 @@ it("uses the project's template and default source consistently for choices, pre
   await harness.lifecycle.dispose();
 });
 
+describe("pull request status", () => {
+  const prRow = (state: string, checks = "passing") => ({
+    outcome: "available", source: "pr-ref", fetchedAt: 1, local: { branch: null, head: "a".repeat(40), sync: { ahead: 0, behind: 0 } },
+    pullRequest: {
+      number: 7, title: "Add widgets", url: "https://github.com/acme/widget/pull/7", state, author: "sam", headRefName: "widgets", baseRefName: "main",
+      headRefOid: "a".repeat(40), fork: false, additions: 1, deletions: 2, changedFiles: 1, commits: 1, review: null, reviewRequests: 0,
+      unresolvedThreads: 0, comments: 0, mergeable: "mergeable", mergeState: "CLEAN", autoMerge: false, inMergeQueue: false,
+      checks: { state: checks, passed: 1, failed: 0, pending: 0, skipped: 0, total: 1, items: [] }, stack: null, updatedAt: "2026-11-18T00:00:00Z",
+    },
+  });
+  const environment = (overrides: Record<string, unknown> = {}) => ({
+    id: "env_pr", hostId: "host_1", path: "/worktrees/pr-7", isGitRepo: true, status: "ready", lifecycle: { phase: "active" }, hostLifecycle: "active",
+    environmentProviderId: "flexible-worktrees", environmentProviderSelection: { inputs: { target: "pr", number: 7, remote: "upstream" } }, ...overrides,
+  });
+  function setup(env: () => unknown, status: () => unknown) {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "flexible-worktrees",
+      sdk: { environments: { get: async () => env() } } as never,
+      experimental_callHostRpc: async ({ method }) => {
+        if (method !== "prStatus") throw new Error(`Unexpected method ${method}`);
+        return status();
+      },
+    });
+    const invalidate = vi.spyOn(bb.rpc, "experimental_invalidate");
+    plugin(bb);
+    const read = async () => (await harness.behavior.callRpc("pullRequestStatus", { keys: ["env_pr"] }) as Record<string, { outcome: string }>).env_pr!;
+    return { harness, invalidate, read };
+  }
+
+  it("asks the environment's machine, passing the PR target so detached checkouts keep their PR", async () => {
+    const t = setup(() => environment(), () => prRow("open"));
+    expect(await t.read()).toMatchObject({ outcome: "available", pullRequest: { number: 7 } });
+    expect(t.harness.experimental_hostRpcCalls).toEqual([expect.objectContaining({ method: "prStatus", hostId: "host_1", input: { path: "/worktrees/pr-7", pr: { number: 7, remote: "upstream" } } })]);
+    // Cached: a second read doesn't ask again.
+    await t.read();
+    expect(t.harness.experimental_hostRpcCalls).toHaveLength(1);
+    await t.harness.lifecycle.dispose();
+  });
+
+  it("shows nothing for environments without a live checkout, and reports unreachable machines", async () => {
+    for (const env of [environment({ path: null }), environment({ status: "destroyed" }), environment({ hostLifecycle: "removed" }), environment({ isGitRepo: false })]) {
+      const t = setup(() => env, () => prRow("open"));
+      expect(await t.read()).toMatchObject({ outcome: "absent" });
+      expect(t.harness.experimental_hostRpcCalls).toHaveLength(0);
+      await t.harness.lifecycle.dispose();
+    }
+    const other = setup(() => environment({ environmentProviderId: "worktree", environmentProviderSelection: null }), () => prRow("open"));
+    await other.read();
+    expect(other.harness.experimental_hostRpcCalls[0]!.input).toEqual({ path: "/worktrees/pr-7" });
+    await other.harness.lifecycle.dispose();
+    const offline = setup(() => environment(), () => { throw new Error("host offline"); });
+    expect(await offline.read()).toMatchObject({ outcome: "unavailable", message: expect.stringContaining("host offline") });
+    await offline.harness.lifecycle.dispose();
+  });
+
+  it("re-reads watched rows and refreshes clients only when the row changes", async () => {
+    vi.useFakeTimers();
+    try {
+      let current = prRow("open", "pending");
+      const t = setup(() => environment(), () => ({ ...current, fetchedAt: Date.now() }));
+      await t.read();
+      const stop = t.harness.behavior.experimental_watchRpc("pullRequestStatus", { key: "env_pr" });
+      // Pending checks re-check after 20 seconds; an unchanged row doesn't refresh clients.
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(t.harness.experimental_hostRpcCalls).toHaveLength(2);
+      expect(t.invalidate).not.toHaveBeenCalled();
+      current = prRow("open", "passing");
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(t.invalidate).toHaveBeenCalledWith(["pr-status:env_pr"]);
+      // Settled checks back off to a minute.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(t.harness.experimental_hostRpcCalls).toHaveLength(3);
+      stop();
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(t.harness.experimental_hostRpcCalls).toHaveLength(3);
+      await t.harness.lifecycle.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+});
+
 it("validates destination settings before saving and describes them concisely", async () => {
   const { bb, harness } = createFakePluginHost({ pluginId: "flexible-worktrees" });
   plugin(bb);
   const descriptors = harness.registrations.settingsDescriptors;
-  expect(Object.keys(descriptors)).toEqual(["pathTemplate", "projectOverrides", "initSubmodules"]);
+  expect(Object.keys(descriptors)).toEqual(["pathTemplate", "projectOverrides", "initSubmodules", "showStatusBar"]);
+  expect(descriptors.showStatusBar.default).toBe(false);
   expect(descriptors.pathTemplate.default).toBe("~/worktrees/{pathKey}");
   expect(descriptors.pathTemplate.description).toContain("Blank uses ~/worktrees/{pathKey}");
   await expect(harness.behavior.setSettings({ projectOverrides: '{"project":false}' })).rejects.toThrow();

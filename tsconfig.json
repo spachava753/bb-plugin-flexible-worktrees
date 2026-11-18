@@ -23,6 +23,7 @@
   "include": [
     "worktree",
     "picker",
+    "statusbar",
     "*.ts",
     "*.tsx",
     "components",

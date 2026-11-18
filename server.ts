@@ -1,7 +1,9 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { hostContract, inputsSchema, rpcContract } from "./contract";
 import { DEFAULT_PATH_TEMPLATE, projectOverridesSettingSchema, shortPath, templateSchema, type Inputs, type PlanResult } from "./inputs";
+import { registerPrStatus } from "./pr-status";
 import { projectTemplate } from "./settings";
+import { STATUS_BAR_SETTING } from "./status";
 export { rpcContract } from "./contract";
 
 const PROVIDER_ID = "flexible-worktrees";
@@ -23,6 +25,11 @@ export default function plugin(bb: BbPluginApi) {
       type: "boolean", label: "Initialize submodules in new worktrees",
       description: "Runs git submodule update --init --recursive after creating a worktree. Failures are reported but don't stop the launch.",
       default: true,
+    },
+    [STATUS_BAR_SETTING]: {
+      type: "boolean", label: "Show pull request status above the composer",
+      description: "GitHub's line diff, CI checks, review, stack position, and local sync for the thread's PR, including detached PR checkouts. Uses gh on the environment's machine.",
+      default: false,
     },
   });
   const host = bb.hosts.experimental_client({ contract: hostContract });
@@ -93,7 +100,9 @@ export default function plugin(bb: BbPluginApi) {
     };
   }
 
+  const prStatus = registerPrStatus(bb, host);
   bb.rpc.register(rpcContract, {
+    ...prStatus.handlers,
     async choices({ projectId, hostId }) {
       const { source, pathTemplate } = await scope(projectId, hostId);
       return { ...await host.call("choices", { source }, { hostId }), pathTemplate };
@@ -110,6 +119,7 @@ export default function plugin(bb: BbPluginApi) {
       }
     },
   });
+  prStatus.watch();
 
   bb.experimental_environments.register({
     id: PROVIDER_ID, displayName: "Flexible Worktrees",

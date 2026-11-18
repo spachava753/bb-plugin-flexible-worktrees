@@ -22,10 +22,14 @@ Set one path template for every new worktree: unique folders under `~/worktrees`
 
 New worktrees get their submodules initialized and the untracked files listed in `.worktreeinclude` (such as `.env`) copied over before BB runs your setup script.
 
+## See your PR above the composer
+
+Turn on the pull request status bar to see the thread's PR at a glance, even on a detached review checkout: GitHub's line diff against its base, CI checks, review state, its layer in a GitHub stack, and whether your checkout is ahead of or behind the PR head. Expand it for failing checks, merge blockers, and the stack map, each linked to GitHub.
+
 ## Keep control of your files
 
 The plugin never deletes worktrees or branches. Manage them with `git worktree` when you're done. If BB restores a thread's environment, the plugin reattaches the files it left behind instead of creating a new worktree. Existing checkouts are attached exactly as they are, and existing files are never overwritten.
 
 ## Requirements
 
-Requires BB 0.43 or newer, Plugin SDK 0.4.87 or newer, and Git 2.31 or newer on the selected machine. The GitHub CLI (`gh`) is optional and enables the pull request list. Like other BB plugins, it runs as full-trust code and can access files on the selected machine.
+Requires BB 0.43 or newer, Plugin SDK 0.4.87 or newer, and Git 2.31 or newer on the selected machine. The GitHub CLI (`gh`) is optional and enables the pull request list and status bar. Like other BB plugins, it runs as full-trust code and can access files on the selected machine.

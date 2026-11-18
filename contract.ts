@@ -1,5 +1,6 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { statusContract, statusRowSchema } from "./status";
 import { choicesSchema, inputsSchema, liveBranchesSchema, planResultSchema, planSchema, previewSchema, pullsSchema, templateSchema } from "./inputs";
 export { inputsSchema, planSchema, type Inputs, type Plan } from "./inputs";
 
@@ -17,6 +18,12 @@ export const hostContract = defineRpcContract({
     input: z.object({ plan: planSchema, inputs: inputsSchema, pathKey: z.string(), initSubmodules: z.boolean(), restoreFrom: z.string().optional() }),
     output: z.object({ path: z.string(), log: z.array(z.string()) }),
   },
+  // Read-only: never fetches or writes refs. `pr` is the environment's PR target, used while HEAD is detached.
+  prStatus: {
+    input: z.object({ path: z.string(), pr: z.object({ number: z.number().int().positive(), remote: z.string().optional() }).optional() }),
+    output: statusRowSchema,
+    experimental_retryable: true,
+  },
 });
 const target = z.object({ projectId: z.string(), hostId: z.string() }).strict();
 export const rpcContract = defineRpcContract({
@@ -24,4 +31,5 @@ export const rpcContract = defineRpcContract({
   liveBranches: { input: target, output: liveBranchesSchema },
   pulls: { input: target, output: pullsSchema },
   preview: { input: target.extend({ inputs: inputsSchema }), output: previewSchema },
+  ...statusContract,
 });
