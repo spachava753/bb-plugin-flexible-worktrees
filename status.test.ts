@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { git } from "./worktree/git";
 import { prStatus, setGitVersionForTesting } from "./worktree/status";
-import { checksLabel, mergeLabel, syncLabel } from "./statusbar/describe";
+import { checksStatus, headline, mergeStatus, syncStatus } from "./statusbar/describe";
 import type { PullRequest } from "./status";
 
 // A fake gh: answers `pr view` and `api graphql` from a scenario file and logs every call.
@@ -238,13 +238,23 @@ it("asks gh which repository a detached PR target belongs to when several remote
   expect((await calls()).map(args => args[0])).toEqual(["api"]);
 });
 
-it("describes checks, merge blockers, and local sync for the bar", () => {
-  const pr = { checks: { state: "pending", failed: 0, pending: 2, passed: 5, total: 8 }, state: "open", mergeable: "mergeable", mergeState: "BEHIND", baseRefName: "main", inMergeQueue: false } as PullRequest;
-  expect(checksLabel(pr)).toEqual({ text: "2 running, 5 passed, 1 skipped", tone: "waiting" });
-  expect(mergeLabel(pr)).toEqual({ text: "Behind main", tone: "bad" });
-  expect(mergeLabel({ ...pr, mergeable: "conflicting" })?.text).toBe("Merge conflicts");
-  expect(mergeLabel({ ...pr, state: "merged" })).toBeNull();
-  expect(checksLabel({ ...pr, checks: { ...pr.checks, state: "failing" } }).text).toBe("Failing, 2 running, 5 passed, 1 skipped");
-  expect(syncLabel({ branch: null, head: "a", sync: { ahead: 0, behind: 2 } }).text).toBe("2 commits behind the PR");
-  expect(syncLabel({ branch: "x", head: "a", sync: { ahead: 1, behind: 1 } }).text).toBe("Diverged from the PR head: 1 local commit, 1 PR commit");
+it("leads the bar with what to act on first, and describes each status line", () => {
+  const pr = {
+    checks: { state: "pending", failed: 0, pending: 2, passed: 5, total: 8 }, state: "open", mergeable: "mergeable", mergeState: "BEHIND",
+    baseRefName: "main", inMergeQueue: false, autoMerge: false, review: "review_required", reviewRequests: 0, unresolvedThreads: 0, comments: 0,
+  } as PullRequest;
+  expect(checksStatus(pr)).toMatchObject({ title: "2 checks running", detail: "5 passed · 1 skipped", tone: "waiting" });
+  expect(checksStatus({ ...pr, checks: { ...pr.checks, state: "failing" } })).toMatchObject({ title: "Checks failing", detail: "2 running · 5 passed · 1 skipped", tone: "bad" });
+  expect(mergeStatus(pr)).toMatchObject({ title: "Behind main", tone: "waiting" });
+  // The order a developer acts in: conflicts, then failing checks, requested changes, behind, running checks, review.
+  expect(headline(pr).title).toBe("Behind main");
+  expect(headline({ ...pr, mergeState: "CLEAN" }).title).toBe("2 checks running");
+  expect(headline({ ...pr, review: "changes_requested" }).title).toBe("Changes requested");
+  expect(headline({ ...pr, mergeable: "conflicting", review: "changes_requested" }).title).toBe("Merge conflicts");
+  expect(headline({ ...pr, mergeState: "CLEAN", checks: { ...pr.checks, state: "passing", pending: 0 } }).title).toBe("Review required");
+  expect(headline({ ...pr, state: "merged" }).title).toBe("Merged");
+  // Branch rules usually follow from the lines above, so they inform without alarming.
+  expect(mergeStatus({ ...pr, mergeState: "BLOCKED" })).toMatchObject({ title: "Merging is blocked", tone: "muted" });
+  expect(syncStatus({ branch: null, head: "a", sync: { ahead: 0, behind: 2 } })).toMatchObject({ title: "2 commits behind the PR", detail: "Detached" });
+  expect(syncStatus({ branch: "x", head: "a", sync: { ahead: 1, behind: 1 } })).toMatchObject({ title: "Diverged from the PR", detail: "1 local, 1 on the PR" });
 });

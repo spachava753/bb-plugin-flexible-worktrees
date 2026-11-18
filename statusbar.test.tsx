@@ -25,20 +25,25 @@ const pullRequest: PullRequest = {
 const available: StatusRow = { outcome: "available", source: "pr-ref", fetchedAt: 1, pullRequest, local: { branch: null, head: "a".repeat(40), sync: { ahead: 0, behind: 0 } } };
 
 /** Mounts the segment's parts the way bb's context row does. */
-async function mount(row: StatusRow, settings: Record<string, boolean>) {
+async function mount(row: StatusRow, settings: Record<string, boolean>, git: { segments: string[]; status: unknown } = { segments: [], status: {} }) {
   const app = await loadPluginApp(() => import("./app"));
   const segment = app.threadContextSegments.find(s => s.id === "pull-request-status") as ExperimentalThreadContextSegmentRegistration;
   const input = { threadId: "thr_1", projectId: "proj_1", environment: { id: "env_pr" } };
   function Row() {
     const [open, setOpen] = useState(false);
     if (!segment.useVisible!(input)) return <p>hidden</p>;
-    const props = { ...input, segments: [{ key: "flexible-worktrees/pull-request-status", pluginId: "flexible-worktrees" }], isExpanded: open, onToggle: () => setOpen(o => !o) };
+    const segments = [{ key: "flexible-worktrees/pull-request-status", pluginId: "flexible-worktrees" }, ...git.segments.map(key => ({ key, pluginId: key.split("/")[0]! }))];
+    const props = { ...input, segments, isExpanded: open, onToggle: () => setOpen(o => !o) };
     const { summary: Summary, action: Action, details: Details } = segment;
     return <div><Summary {...props} />{Action && <Action {...props} />}{Details && <Details {...props} />}</div>;
   }
   return renderSlot({ component: Row }, {}, {
     settings,
-    rpc: { pullRequestStatus: ({ keys }: { keys: string[] }) => Object.fromEntries(keys.map(k => [k, row])), refreshPullRequestStatus: () => ({ ok: true }) } as never,
+    rpc: {
+      pullRequestStatus: ({ keys }: { keys: string[] }) => Object.fromEntries(keys.map(k => [k, row])),
+      refreshPullRequestStatus: () => ({ ok: true }),
+      status: () => git.status,
+    } as never,
   });
 }
 
@@ -54,7 +59,19 @@ it("keeps the last PR visible, marked, when a refresh failed", async () => {
   const slot = await mount({ ...available, refreshError: "GitHub didn’t answer in time." }, { showStatusBar: true });
   const toggle = await screen.findByRole("button", { name: /not refreshed: GitHub didn’t answer in time\.$/ });
   fireEvent.click(toggle);
-  expect(within(screen.getByRole("region")).getByText(/Couldn’t refresh, showing status from .*GitHub didn’t answer in time\./)).toBeTruthy();
+  expect(within(screen.getByRole("region")).getByText(/Couldn’t refresh\. Showing status from .*GitHub didn’t answer in time\./)).toBeTruthy();
+  slot.lifecycle.unmount();
+});
+
+it("says whose commits a merged PR took, without a merge line the header already covers", async () => {
+  const slot = await mount({ ...available, pullRequest: { ...pullRequest, state: "merged" } }, { showStatusBar: true });
+  const toggle = await screen.findByRole("button", { name: /^PR #7, Merged: Merged/ });
+  // The state icon already says merged; neither a second merged glyph nor a checks glyph follows it.
+  expect(toggle.querySelectorAll("[aria-hidden=true]").length).toBeLessThan(4);
+  fireEvent.click(toggle);
+  const details = within(screen.getByRole("region"));
+  expect(details.getByText(/7 commits by sam merged into/)).toBeTruthy();
+  expect(within(details.getByRole("list", { name: "Pull request status" })).queryByText("Merged")).toBeNull();
   slot.lifecycle.unmount();
 });
 
@@ -65,31 +82,53 @@ it("hides when the checkout has no PR", async () => {
   slot.lifecycle.unmount();
 });
 
-it("shows a detached PR's GitHub diff, checks, and stack at a glance, with details on demand", async () => {
+it("leads with what to act on, and opens a drawer with the PR's checklist and stack", async () => {
   const slot = await mount(available, { showStatusBar: true });
-  const toggle = await screen.findByRole("button", { name: /^PR #7, Open; \+1,204 −310 on GitHub; checks: 1 failing, 1 running, 9 passed; stack layer 2 of 3; Changes requested$/ });
-  expect(within(toggle).getByText("1 failing")).toBeTruthy();
+  const toggle = await screen.findByRole("button", { name: "PR #7, Open: 1 check failing; stack layer 2 of 3" });
+  expect(within(toggle).getByText("1 check failing")).toBeTruthy();
   expect(within(toggle).getByText("2/3", { exact: false })).toBeTruthy();
+  // bb's Git segment isn't in this row, so GitHub's line count shows.
+  expect(within(toggle).getByText("+1,204")).toBeTruthy();
   expect(screen.getByRole("link", { name: "Open PR #7 on GitHub" }).getAttribute("href")).toBe(pullRequest.url);
   expect(screen.queryByRole("region")).toBeNull();
 
   fireEvent.click(toggle);
   const details = within(screen.getByRole("region"));
-  expect(details.getByText("in 18 files · 7 commits", { exact: false })).toBeTruthy();
+  expect(details.getByText(/sam wants to merge 7 commits into/)).toBeTruthy();
+  expect(details.getByText("18 files", { exact: false })).toBeTruthy();
+  const status = within(details.getByRole("list", { name: "Pull request status" }));
   // Only checks that need attention are listed, each linking to its run.
-  expect(details.getByRole("link", { name: "CI / test" }).getAttribute("href")).toBe("https://ci/test");
-  expect(details.getByText("CI / e2e")).toBeTruthy();
-  expect(details.queryByText("CI / lint")).toBeNull();
-  expect(details.getByText("2 unresolved threads · 4 comments")).toBeTruthy();
-  expect(details.getByText("Blocked by branch rules")).toBeTruthy();
+  expect(status.getByRole("link", { name: /^Failing:\s*CI \/ test$/ }).getAttribute("href")).toBe("https://ci/test");
+  expect(status.getByText("CI / e2e")).toBeTruthy();
+  expect(status.queryByText("CI / lint")).toBeNull();
+  expect(status.getByText("Changes requested")).toBeTruthy();
+  expect(status.getByText("2 unresolved · 4 comments")).toBeTruthy();
+  expect(status.getByText("Merging is blocked")).toBeTruthy();
+  expect(status.getByText("In sync with the PR")).toBeTruthy();
+  expect(status.getByText("Detached · aaaaaaa")).toBeTruthy();
   const stack = within(details.getByRole("list", { name: "Stack #3" }));
-  expect(stack.getAllByRole("listitem").map(li => li.textContent)).toEqual(["3#8 Widget UI", "2#7 Add widgets (this PR)", "1#6 Auth", "main"]);
-  expect(stack.getByRole("link", { name: "#8 Widget UI" }).getAttribute("href")).toBe("https://github.com/acme/widget/pull/8");
-  expect(details.getByText("Matches the PR head")).toBeTruthy();
-  expect(details.getByText("aaaaaaaaaa")).toBeTruthy();
+  expect(stack.getAllByRole("listitem").map(li => li.textContent)).toEqual(["#8 Widget UIDraft", "#7 Add widgetsThis PR", "#6 AuthMerged", "main"]);
+  expect(stack.getByRole("link", { name: /#8 Widget UI/ }).getAttribute("href")).toBe("https://github.com/acme/widget/pull/8");
 
   expect(toggle.getAttribute("aria-controls")).toBe("flexible-worktrees-pr-status-body-thr_1");
   fireEvent.click(details.getByRole("button", { name: "Refresh pull request status" }));
   await waitFor(() => expect(slot.inspection.rpcCalls.some(c => c.method === "refreshPullRequestStatus")).toBe(true));
+  // While open, the drawer's header carries the line count, so the bar drops its own.
+  expect(within(toggle).queryByText("+1,204")).toBeNull();
+  fireEvent.click(details.getByRole("button", { name: "Collapse pull request status" }));
+  expect(screen.queryByRole("region")).toBeNull();
+  expect(document.activeElement).toBe(toggle);
   slot.lifecycle.unmount();
+});
+
+it("leaves the line count to bb's Git segment when it shows the same commits", async () => {
+  const git = (mergeBase: { insertions: number; deletions: number }, hasUncommittedChanges = false) =>
+    ({ env_pr: { outcome: "available", workspace: { workingTree: { hasUncommittedChanges }, mergeBase } } });
+  for (const [status, shown] of [[git({ insertions: 1204, deletions: 310 }), false], [git({ insertions: 1204, deletions: 310 }, true), true], [git({ insertions: 5, deletions: 0 }), true]] as const) {
+    const slot = await mount(available, { showStatusBar: true }, { segments: ["bb--git/changed-files"], status });
+    const toggle = await screen.findByRole("button", { name: /^PR #7/ });
+    await waitFor(() => expect(slot.inspection.rpcCalls.some(c => c.method === "status")).toBe(true));
+    await waitFor(() => expect(within(toggle).queryByText("+1,204") !== null).toBe(shown));
+    slot.lifecycle.unmount();
+  }
 });
