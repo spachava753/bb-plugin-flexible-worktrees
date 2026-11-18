@@ -41,6 +41,7 @@ export const pullRequestSchema = z.object({
   commits: z.number(),
   review: z.enum(["approved", "changes_requested", "review_required"]).nullable(),
   reviewRequests: z.number(),
+  /** Among the first 100 review threads. */
   unresolvedThreads: z.number(),
   comments: z.number(),
   mergeable: z.enum(["mergeable", "conflicting", "unknown"]),
@@ -71,7 +72,11 @@ export type Local = z.infer<typeof localSchema>;
 /** How the PR was found: the checked-out branch, a fetched PR ref at HEAD, or the environment's PR target. */
 export const sourceSchema = z.enum(["branch", "pr-ref", "target"]);
 export const statusRowSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("available"), pullRequest: pullRequestSchema, local: localSchema, source: sourceSchema, fetchedAt: z.number() }),
+  z.object({
+    outcome: z.literal("available"), pullRequest: pullRequestSchema, local: localSchema, source: sourceSchema, fetchedAt: z.number(),
+    /** The latest refresh failed; this is the last status read, from `fetchedAt`. */
+    refreshError: z.string().optional(),
+  }),
   z.object({ outcome: z.literal("absent"), fetchedAt: z.number() }),
   z.object({ outcome: z.literal("unavailable"), message: z.string(), fetchedAt: z.number() }),
 ]);

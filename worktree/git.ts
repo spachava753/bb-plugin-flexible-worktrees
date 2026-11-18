@@ -5,10 +5,10 @@ import type { Plan, Worktree } from "../inputs";
 import { realpathOf } from "./fs";
 
 export const exec = promisify(execFile);
-export async function git(cwd: string, args: string[], signal?: AbortSignal, timeout = 120_000) {
+export async function git(cwd: string, args: string[], signal?: AbortSignal, timeout = 120_000, env?: Record<string, string>) {
   const { stdout } = await exec("git", ["-C", cwd, ...args], {
     signal, timeout, maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env },
   });
   return stdout.trimEnd();
 }
@@ -27,8 +27,8 @@ export class FetchError extends Error {
 }
 
 /** One checkout's Git operations, bound to a cancellation signal. Every command uses argv, never a shell. */
-export function repo(dir: string, signal?: AbortSignal) {
-  const run = (args: string[], timeout?: number) => git(dir, args, signal, timeout);
+export function repo(dir: string, signal?: AbortSignal, env?: Record<string, string>) {
+  const run = (args: string[], timeout?: number) => git(dir, args, signal, timeout, env);
   /** Like run(), but a failed command yields null. Cancellation still throws. */
   const attempt = async (args: string[], timeout?: number) => {
     try { return await run(args, timeout); } catch {

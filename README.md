@@ -57,7 +57,7 @@ It works for any environment with a Git checkout, not only this provider's:
 - A checked-out branch finds its PR with `gh pr view`, which follows push remotes and forks.
 - A detached checkout finds its PR from the plugin's fetched PR ref at `HEAD` (`refs/flexible-worktrees/pr/<remote>/<n>`). An environment created for a PR keeps showing it after new commits on the detached head, which count as commits not on the PR.
 
-Status is read on the environment's machine with `git` and `gh api graphql`; nothing is fetched or written. While a thread shows the bar, it re-checks about every 20 seconds while checks run or mergeability is settling, every minute otherwise, and every 5 minutes for merged or closed PRs. The details panel has a refresh button. GitHub Enterprise Server versions without stacks or merge queues show the rest. Without `gh`, or with `gh` signed out, the segment is hidden.
+Status is read on the environment's machine with `git` and `gh api graphql`; nothing is fetched or written, including the objects a partial clone would otherwise fetch on demand (Git 2.45+; older Git skips the local comparison in partial clones). While a thread shows the bar, it re-checks about every 20 seconds while checks run or mergeability is settling, every minute otherwise, and every 5 minutes for merged or closed PRs. The details panel has a refresh button. GitHub Enterprise Server versions without stacks or merge queues show the rest. Without `gh`, or with `gh` signed out, the segment is hidden. When a refresh fails after a PR was shown (a timeout, a rate limit, or the machine going offline), the bar keeps the last status with a warning icon, and its details say when that status is from.
 
 ## Destinations
 
