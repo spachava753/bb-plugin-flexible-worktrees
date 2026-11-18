@@ -36,8 +36,28 @@ Under **Settings → Installed plugins → Flexible Worktrees**, or with `bb plu
 - `pathTemplate` (default `~/worktrees/{pathKey}`): where new worktrees go. See [Destinations](#destinations).
 - `projectOverrides` (default `{}`): per-project templates. See [Per-project templates](#per-project-templates).
 - `initSubmodules` (default `true`): runs `git submodule update --init --recursive` in new worktrees.
+- `showStatusBar` (default `false`): shows the [pull request status bar](#pull-request-status-bar) above the composer.
 
 Settings are read on each creation; no reload is required.
+
+## Pull request status bar
+
+Turn on `showStatusBar` to show a segment above each thread's composer for the PR its checkout is on:
+
+```sh
+bb plugin config flexible-worktrees set showStatusBar true
+# Optional: hide the built-in GitHub PR Status segment so the PR isn't shown twice
+bb plugin config bb--github-pr-status set showPullRequest false
+```
+
+At a glance it shows the PR number and state, **GitHub's** line diff against the PR's base branch (not the local diff), the CI checks, the PR's layer in a [GitHub stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) (such as `2/3`), an approval or requested changes, and `↑`/`↓` when the checkout and the PR head differ. The link icon opens the PR. Click the segment for details: title, author, head and base branches, files and commits, failing and running checks with links to their runs, review state with unresolved threads and comments, what blocks merging (conflicts, behind the base, branch rules, the merge queue, auto-merge), the stack map with links to every layer, and how the local checkout compares to the PR head.
+
+It works for any environment with a Git checkout, not only this provider's:
+
+- A checked-out branch finds its PR with `gh pr view`, which follows push remotes and forks.
+- A detached checkout finds its PR from the plugin's fetched PR ref at `HEAD` (`refs/flexible-worktrees/pr/<remote>/<n>`). An environment created for a PR keeps showing it after new commits on the detached head, which count as commits not on the PR.
+
+Status is read on the environment's machine with `git` and `gh api graphql`; nothing is fetched or written. While a thread shows the bar, it re-checks about every 20 seconds while checks run or mergeability is settling, every minute otherwise, and every 5 minutes for merged or closed PRs. The details panel has a refresh button. GitHub Enterprise Server versions without stacks or merge queues show the rest. Without `gh`, or with `gh` signed out, the segment is hidden.
 
 ## Destinations
 

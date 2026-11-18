@@ -5,6 +5,7 @@ import { create } from "./worktree/create";
 import { repo } from "./worktree/git";
 import { pulls } from "./worktree/github";
 import { plan } from "./worktree/plan";
+import { prStatus } from "./worktree/status";
 
 export default experimental_defineHostEntry({
   contract: hostContract,
@@ -14,5 +15,6 @@ export default experimental_defineHostEntry({
     pulls: ({ source }, ctx) => pulls(repo(source, ctx.signal)),
     plan: (args, ctx) => plan({ ...args, dataDir: ctx.experimental_paths.dataDir }, ctx.signal),
     create: (args, ctx) => create(args, ctx.experimental_paths.dataDir, ctx.signal),
+    prStatus: (args, ctx) => prStatus(args, ctx.signal),
   },
 });

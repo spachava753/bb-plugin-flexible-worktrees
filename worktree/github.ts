@@ -6,12 +6,19 @@ type GhPull = { number: number; title: string; author?: { login?: string }; head
 const fields = "number,title,author,headRefName,baseRefName,isCrossRepository,isDraft,updatedAt";
 
 /** Run the GitHub CLI (if installed) for JSON output. Never prompts. */
-async function gh<T>(r: Repo, args: string[]): Promise<T> {
+export async function gh<T>(r: Repo, args: string[]): Promise<T> {
   const { stdout } = await exec("gh", args, {
     cwd: r.dir, signal: r.signal, timeout: 20_000, maxBuffer: 4 * 1024 * 1024,
     env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1", GIT_TERMINAL_PROMPT: "0" },
   });
   return JSON.parse(stdout) as T;
+}
+/** A user-facing reason a gh command failed. */
+export function ghFailure(error: unknown) {
+  if ((error as NodeJS.ErrnoException).code === "ENOENT") return "Install the GitHub CLI (gh) on this machine to see pull request status.";
+  const reason = stderr(error);
+  if (/auth login|not logged in|authentication/i.test(reason)) return "Run `gh auth login` on this machine to see pull request status.";
+  return `Couldn’t load pull request status: ${reason || (error as Error).message || "unknown error"}`;
 }
 const toPull = (p: GhPull): Pull => ({
   number: p.number, title: p.title, author: p.author?.login ?? "", head: p.headRefName, base: p.baseRefName,

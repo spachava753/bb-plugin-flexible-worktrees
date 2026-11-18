@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { definePluginApp, useRpc, type PluginEnvironmentProviderInputsProps } from "@get-bb/plugin-sdk/app";
 import { defaultInputs, inputsSchema, type Inputs } from "./inputs";
 import { useChoices, usePreview, useRemoteData } from "./picker/data";
+import { Action, Details, Summary, useVisible } from "./statusbar/StatusBar";
 import { TemplateReference } from "./TemplateReference";
 import { WorktreePicker } from "./WorktreePicker";
 import type { rpcContract } from "./server";
@@ -34,6 +35,11 @@ function InputsForm(props: PluginEnvironmentProviderInputsProps) {
 }
 export default definePluginApp(app => {
   app.slots.settingsSection({ id: "template-reference", title: "Template reference", component: TemplateReference });
+  // Off unless the showStatusBar setting is on; sits beside GitHub PR Status's segment (group 2_pullRequest).
+  app.slots.experimental_threadContextSegment({
+    id: "pull-request-status", title: "Pull request status", group: "2_pullRequest", order: 20,
+    summary: Summary, action: Action, details: Details, useVisible,
+  });
   app.slots.experimental_environmentProviderInputs({
     environmentProviderId: "flexible-worktrees",
     component: props => <InputsForm key={`${props.projectId}:${props.target.kind === "existing-host" ? props.target.hostId : "new"}`} {...props} />,
