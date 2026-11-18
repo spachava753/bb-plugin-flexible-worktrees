@@ -58,15 +58,14 @@ export function mergeLabel(pr: PullRequest): Label | null {
   }
 }
 
-/** The local checkout relative to the PR head on GitHub. */
+/** The local checkout relative to the PR head on GitHub. The branch and commit are shown beside it. */
 export function syncLabel(local: Local): Label {
-  const at = local.branch ? `\`${local.branch}\`` : "Detached HEAD";
-  if (!local.sync) return { text: `The PR head isn’t fetched here, so ${local.branch ? `\`${local.branch}\`` : "this checkout"} may be behind`, tone: "waiting" };
+  if (!local.sync) return { text: "The PR head isn’t fetched here, so this checkout may be behind", tone: "waiting" };
   const { ahead, behind } = local.sync;
-  if (!ahead && !behind) return { text: `${at} matches the PR head`, tone: "good" };
-  if (ahead && behind) return { text: `${at} diverged from the PR head: ${plural(ahead, "local commit")}, ${plural(behind, "PR commit")}`, tone: "bad" };
-  if (ahead) return { text: `${at} has ${plural(ahead, "commit")} not on the PR`, tone: "waiting" };
-  return { text: `${at} is ${plural(behind, "commit")} behind the PR`, tone: "waiting" };
+  if (!ahead && !behind) return { text: "Matches the PR head", tone: "good" };
+  if (ahead && behind) return { text: `Diverged from the PR head: ${plural(ahead, "local commit")}, ${plural(behind, "PR commit")}`, tone: "bad" };
+  if (ahead) return { text: `${plural(ahead, "commit")} not on the PR`, tone: "waiting" };
+  return { text: `${plural(behind, "commit")} behind the PR`, tone: "waiting" };
 }
 
 /** One sentence for the bar's accessible name. */
@@ -77,6 +76,6 @@ export function summaryText(pr: PullRequest, local: Local) {
     `checks: ${checksLabel(pr).text}`,
     ...(pr.stack ? [`stack layer ${pr.stack.position} of ${pr.stack.size}`] : []),
     ...(reviewLabel(pr) ? [reviewLabel(pr)!.text] : []),
-    ...(local.sync && !local.sync.ahead && !local.sync.behind ? [] : [syncLabel(local).text.replaceAll("`", "")]),
+    ...(local.sync && !local.sync.ahead && !local.sync.behind ? [] : [`checkout: ${syncLabel(local).text}`]),
   ].join("; ");
 }
